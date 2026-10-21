@@ -49,6 +49,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     // 全屏点击切换
     UIWindow                *_boundWindow;
     UITapGestureRecognizer  *_winTap;
+    NSTimeInterval           _lastTapTime;
 }
 @end
 
@@ -100,6 +101,9 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     t.delegate = self;
     [window addGestureRecognizer:t];
     _winTap = t;
+
+    IVLog(@"bindWindow ok: %@ (gesture count=%lu)",
+          NSStringFromClass([window class]), (unsigned long)window.gestureRecognizers.count);
 }
 
 - (void)unbindWindow {
@@ -110,34 +114,83 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     _boundWindow = nil;
 }
 
+/// 关键：允许和相册自己的全屏 tap 同时识别。
+/// UIKit 默认手势互斥，相册那个 tap 在更深的视图上、优先级更高，
+/// 不返回 YES 的话我们这个 window 级 tap 永远不会触发。
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    return YES;
+}
+
 /// 只接「画面空白处」的点击：按钮、导航栏、工具栏、自己的控件都放过。
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
        shouldReceiveTouch:(UITouch *)touch {
     if (gestureRecognizer != _winTap) return YES;
 
     UIView *v = touch.view;
-    if (v == nil) return NO;
-    if (v == self || [v isDescendantOfView:self]) return NO;
+    if (v == nil) {
+        IVLog(@"shouldReceiveTouch: view=nil -> NO");
+        return NO;
+    }
+    if (v == self || [v isDescendantOfView:self]) {
+        IVLog(@"shouldReceiveTouch: %@ 是自己的控件 -> NO", NSStringFromClass([v class]));
+        return NO;
+    }
 
+    // 只查近 8 层：相册深层容器常常是 UIControl 子类，
+    // 查太深会把整块画面点击一起否掉（这是上一版点不动的主因之一）。
     UIView *p = v;
     int guard = 0;
-    while (p != nil && guard < 24) {
-        if ([p isKindOfClass:[UIControl class]]) return NO;
+    while (p != nil && guard < 8) {
+        if ([p isKindOfClass:[UIControl class]]) {
+            IVLog(@"shouldReceiveTouch: 命中 UIControl %@ -> NO", NSStringFromClass([p class]));
+            return NO;
+        }
         if ([p isKindOfClass:[UINavigationBar class]]) return NO;
         if ([p isKindOfClass:[UIToolbar class]]) return NO;
         if ([p isKindOfClass:[UITabBar class]]) return NO;
         p = p.superview;
         guard++;
     }
+
+    IVLog(@"shouldReceiveTouch: %@ -> YES", NSStringFromClass([v class]));
     return YES;
 }
 
 - (void)onWindowTap:(UITapGestureRecognizer *)g {
+    IVLog(@"onWindowTap state=%ld", (long)g.state);
     if (g.state != UIGestureRecognizerStateEnded) return;
+    CGPoint p = [g locationInView:self];
+    [self handleExternalTapAt:p inView:self];
+}
+
+/// 兜底入口：window tap 和 sendEvent 观察都会调到这里，靠时间戳去重。
+- (void)handleExternalTapAt:(CGPoint)point inView:(UIView *)view {
+    NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
+    if (now - _lastTapTime < 0.18) {
+        IVLog(@"tap deduped");
+        return;
+    }
+    _lastTapTime = now;
+
+    CGPoint p = (view == self) ? point : [self convertPoint:point fromView:view];
+
+    // 落在自己的控件上不处理（按钮/胶囊自己会响应）
+    if (_chromeVisible && _pill.alpha > 0.05 && CGRectContainsPoint(_pill.frame, p)) {
+        IVLog(@"tap on pill ignored");
+        return;
+    }
+    if (_chromeVisible && _centerWrap.alpha > 0.05 && CGRectContainsPoint(_centerWrap.frame, p)) {
+        IVLog(@"tap on centers ignored");
+        return;
+    }
+
+    IVLog(@"tap -> toggle chrome (was %d)", _chromeVisible);
     [self setChromeVisible:!_chromeVisible animated:YES];
 }
 
 - (void)setChromeVisible:(BOOL)visible animated:(BOOL)animated {
+    IVLog(@"setChromeVisible:%d (current=%d)", visible, _chromeVisible);
     if (_chromeVisible == visible) return;
     _chromeVisible = visible;
 
