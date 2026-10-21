@@ -31,6 +31,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// 与 window tap 互为兜底，内部有去重。
 - (void)handleExternalTapAt:(CGPoint)point inView:(UIView *)view;
 
+/// 控制层整体显隐（底部胶囊 + 中央按钮一起）
+@property (nonatomic, assign, readonly) BOOL chromeVisible;
+- (void)setChromeVisible:(BOOL)visible animated:(BOOL)animated;
+
 @end
 
 NS_ASSUME_NONNULL_END
