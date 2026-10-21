@@ -42,9 +42,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     double       _currentValue;    // 0..1
     BOOL         _dragging;
     BOOL         _centersVisible;
-    BOOL         _manualHide;
     NSTimer     *_tickTimer;
-    NSTimer     *_hideCenterTimer;
     NSTimer     *_collapseTimer;
 }
 @end
@@ -66,14 +64,13 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 
     _currentValue = 0.0;
     _expanded = NO;
-    _centersVisible = NO;
+    _centersVisible = YES;   // 中央按钮常驻，播放中始终可见
 
     return self;
 }
 
 - (void)dealloc {
     [_tickTimer invalidate];
-    [_hideCenterTimer invalidate];
     [_collapseTimer invalidate];
 }
 
@@ -142,20 +139,14 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     _lblRight.userInteractionEnabled = NO;
     [_pill.contentView addSubview:_lblRight];
 
-    // 手势
-    UILongPressGestureRecognizer *lp =
-        [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onPillLongPress:)];
-    lp.minimumPressDuration = 0.32;
-    lp.allowableMovement = 14.0;
-    lp.cancelsTouchesInView = NO;
-    [_pill addGestureRecognizer:lp];
-
+    // 只有一个 pan：按住胶囊拖动 = 展开 + seek（无长按门槛，跟手）
     UIPanGestureRecognizer *pan =
         [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(onPillPan:)];
     pan.cancelsTouchesInView = NO;
     pan.maximumNumberOfTouches = 1;
     [_pill addGestureRecognizer:pan];
 
+    // 点胶囊空白处切换中央按钮
     UITapGestureRecognizer *tap =
         [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onPillTap:)];
     tap.cancelsTouchesInView = NO;
@@ -170,9 +161,8 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 - (void)buildCenter {
     _centerWrap = [[UIView alloc] initWithFrame:CGRectZero];
     _centerWrap.backgroundColor = [UIColor clearColor];
-    _centerWrap.alpha = 0.0;
+    _centerWrap.alpha = 1.0;
     _centerWrap.userInteractionEnabled = YES;
-    _centerWrap.transform = CGAffineTransformMakeScale(0.86, 0.86);
     [self addSubview:_centerWrap];
 
     _backCircle = [[IVGlassView alloc] initWithRadius:34.0];
@@ -227,7 +217,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     CGFloat pillH = _expanded ? kPillHExpanded : kPillHCompact;
     CGFloat pillW = MIN(W - kPillSide * 2.0, kPillMaxWidth);
     CGFloat pillX = (W - pillW) / 2.0;
-    CGFloat gap   = _expanded ? 42.0 : 26.0;   // 往上抬，别压着 home 横条
+    CGFloat gap   = _expanded ? 60.0 : 40.0;   // 明显往上抬，离 home 横条更远
     CGFloat pillY = H - safeBottom - pillH - gap;
 
     _pill.frame = CGRectMake(pillX, pillY, pillW, pillH);
@@ -307,7 +297,6 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
                                    totalW + gap * 0.8,
                                    midD + gap * 0.8);
 
-    // 内部坐标相对 centerWrap
     CGFloat baseX = gap * 0.4;
     CGFloat baseY = gap * 0.4;
 
@@ -346,8 +335,8 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     CGFloat fillW = trackW * (CGFloat)v;
     _fill.frame = CGRectMake(0.0, 0.0, MAX(0.0, fillW), trackH);
 
-    CGFloat knobD = _expanded ? 16.0 : 0.0;
-    if (_expanded && knobD > 0.0) {
+    if (_expanded) {
+        CGFloat knobD = 16.0;
         // _knob 挂在胶囊 contentView 上，x 要加上进度槽自身的偏移
         CGFloat cx = _track.frame.origin.x + fillW;
         CGFloat cy = _track.frame.origin.y + trackH / 2.0;
@@ -410,11 +399,6 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     }
     IVHaptic();
     [self updatePlayState];
-
-    _manualHide = NO;
-    if (!_expanded) {
-        [self showCenters:YES autoHide:[self isPlaying]];
-    }
 }
 
 - (void)onToggleMute {
@@ -453,92 +437,42 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     if (dur > 0.0) _currentValue = target / dur;
     [self applyProgressValue];
     IVHaptic();
-
-    _manualHide = NO;
-    [self showCenters:YES autoHide:YES];
 }
 
-#pragma mark - 中央按钮显隐
+#pragma mark - 中央按钮显隐（点画面切换）
 
-- (void)showCenters:(BOOL)animated autoHide:(BOOL)autoHide {
-    _centersVisible = YES;
-    [_hideCenterTimer invalidate];
-    _hideCenterTimer = nil;
-
-    __weak typeof(self) ws = self;
-    [UIView animateWithDuration:animated ? 0.15 : 0.0
-                          delay:0.0
-                        options:UIViewAnimationOptionBeginFromCurrentState
-                     animations:^{
-        __strong typeof(ws) s = ws;
-        if (!s) return;
-        s->_centerWrap.alpha = 1.0;
-        s->_centerWrap.transform = CGAffineTransformIdentity;
-    } completion:nil];
-
-    if (autoHide) {
-        _hideCenterTimer = [NSTimer scheduledTimerWithTimeInterval:4.5
-                                                            target:self
-                                                          selector:@selector(onCenterHideTimer)
-                                                          userInfo:nil
-                                                           repeats:NO];
+- (void)toggleCenters {
+    if (_expanded) {
+        // 展开态不隐藏中央按钮
+        return;
     }
-}
-
-- (void)hideCenters:(BOOL)animated {
-    _centersVisible = NO;
-    [_hideCenterTimer invalidate];
-    _hideCenterTimer = nil;
+    _centersVisible = !_centersVisible;
 
     __weak typeof(self) ws = self;
-    [UIView animateWithDuration:animated ? 0.13 : 0.0
+    [UIView animateWithDuration:0.12
                           delay:0.0
                         options:UIViewAnimationOptionBeginFromCurrentState
                      animations:^{
         __strong typeof(ws) s = ws;
         if (!s) return;
-        s->_centerWrap.alpha = 0.0;
-        s->_centerWrap.transform = CGAffineTransformMakeScale(0.92, 0.92);
+        s->_centerWrap.alpha = s->_centersVisible ? 1.0 : 0.0;
+        s->_centerWrap.transform = s->_centersVisible ? CGAffineTransformIdentity
+                                                       : CGAffineTransformMakeScale(0.92, 0.92);
     } completion:nil];
-}
-
-- (void)onCenterHideTimer {
-    _hideCenterTimer = nil;
-    if (_expanded) return;              // 展开态保持显示
-    if (![self isPlaying]) return;      // 暂停时保持显示
-    if (_manualHide) return;
-    [self hideCenters:YES];
 }
 
 #pragma mark - 手势
 
+/// 点胶囊空白处（非按钮区）切换中央按钮显隐
 - (void)onPillTap:(UITapGestureRecognizer *)g {
+    if (g.state != UIGestureRecognizerStateEnded) return;
     CGPoint p = [g locationInView:_pill];
 
-    // 点在按钮上时交给按钮，不要误触发
     if (!_expanded) {
         if (CGRectContainsPoint(_playBtn.frame, p)) return;
         if (CGRectContainsPoint(_muteBtn.frame, p)) return;
     }
-
-    if (_centersVisible) {
-        _manualHide = YES;
-        [self hideCenters:YES];
-    } else {
-        _manualHide = NO;
-        [self showCenters:YES autoHide:[self isPlaying]];
-    }
-}
-
-- (void)onPillLongPress:(UILongPressGestureRecognizer *)g {
-    if (g.state == UIGestureRecognizerStateBegan) {
-        IVHaptic();
-        [self setExpanded:YES animated:YES];
-        [self showCenters:YES autoHide:NO];
-    } else if (g.state == UIGestureRecognizerStateEnded ||
-               g.state == UIGestureRecognizerStateCancelled) {
-        [self scheduleCollapse];
-    }
+    [self toggleCenters];
 }
 
 - (void)onPillPan:(UIPanGestureRecognizer *)g {
@@ -554,7 +488,6 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
         if (!_expanded) {
             IVHaptic();
             [self setExpanded:YES animated:YES];
-            [self showCenters:YES autoHide:NO];
         }
         _dragging = YES;
         [self updateFromPlayerTime];
@@ -615,10 +548,6 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     if (_expanded == expanded) return;
     _expanded = expanded;
 
-    if (expanded) {
-        _manualHide = NO;
-    }
-
     if (!animated) {
         [self setNeedsLayout];
         [self layoutIfNeeded];
@@ -626,7 +555,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     }
 
     __weak typeof(self) ws = self;
-    [UIView animateWithDuration:0.30
+    [UIView animateWithDuration:0.28
                           delay:0.0
          usingSpringWithDamping:0.82
           initialSpringVelocity:0.4
@@ -644,7 +573,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 - (void)scheduleCollapse {
     [_collapseTimer invalidate];
     _collapseTimer = nil;
-    _collapseTimer = [NSTimer scheduledTimerWithTimeInterval:1.4
+    _collapseTimer = [NSTimer scheduledTimerWithTimeInterval:1.6
                                                       target:self
                                                     selector:@selector(onCollapseTimer)
                                                     userInfo:nil
@@ -655,8 +584,6 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     _collapseTimer = nil;
     if (_dragging) return;
     [self setExpanded:NO animated:YES];
-    if (![self isPlaying]) return;
-    [self showCenters:YES autoHide:YES];
 }
 
 #pragma mark - 定时刷新
@@ -674,15 +601,11 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
         }
         [s tick];
     }];
-
-    [self showCenters:YES autoHide:YES];
 }
 
 - (void)stopTracking {
     [_tickTimer invalidate];
     _tickTimer = nil;
-    [_hideCenterTimer invalidate];
-    _hideCenterTimer = nil;
     [_collapseTimer invalidate];
     _collapseTimer = nil;
 }
@@ -708,11 +631,6 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 
     [self updatePlayState];
     [self updateMuteState];
-
-    // 暂停时中央按钮常显（除非用户主动收起过）
-    if (!_centersVisible && !_expanded && !_manualHide && ![self isPlaying]) {
-        [self showCenters:YES autoHide:NO];
-    }
 }
 
 - (void)refreshTimeLabelsForRatio:(double)ratio {
@@ -737,13 +655,16 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 
 #pragma mark - 触摸穿透
 
+/// 只在 pill / 中央按钮组上命中，画面其余区域穿透（保留相册原生 swipe 切图）。
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.hidden || self.alpha < 0.05) return NO;
 
-    for (UIView *v in self.subviews) {
-        if (v.hidden || v.alpha < 0.05) continue;
-        if (!v.userInteractionEnabled) continue;
-        if (CGRectContainsPoint(v.frame, point)) return YES;
+    if (_centersVisible && !_centerWrap.hidden &&
+        CGRectContainsPoint(_centerWrap.frame, point)) {
+        return YES;
+    }
+    if (CGRectContainsPoint(_pill.frame, point)) {
+        return YES;
     }
     return NO;
 }
