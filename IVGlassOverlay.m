@@ -852,8 +852,32 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
                                duration:dur];
     }
 
+    [self holdBeforeNaturalEndWithCurrent:cur duration:dur];
     [self handleEndStateWithCurrent:cur duration:dur];
     [self refreshIconsIfNeeded];
+}
+
+/// 结尾保护：相册一播到「真正的结尾」，就会把播放器换成静帧、退回原生界面，
+/// 我们的控件随之被整块拆掉 —— 这时候再点画面也唤不回来（实测如此）。
+/// 所以在最后一小段主动暂停并停在末帧附近，让「播放结束」这个事件永不发生：
+/// 控件留在原地，用户点播放再由 onPlayPause 把进度 seek 回 0 重播。
+- (void)holdBeforeNaturalEndWithCurrent:(double)cur duration:(double)dur {
+    AVPlayer *p = self.player;
+    if (!p) return;
+    if (dur <= 2.0) return;             // 太短的片子别折腾
+    if (p.rate <= 0.0) return;          // 已经暂停 / 被别的逻辑停了
+    if (cur < dur - 0.30) return;       // 还没到窗口期
+
+    [p pause];
+
+    double target = dur - 0.05;
+    if (target < 0.0) target = 0.0;
+    [p seekToTime:CMTimeMakeWithSeconds(target, 600)
+        toleranceBefore:CMTimeMakeWithSeconds(0.02, 600)
+         toleranceAfter:CMTimeMakeWithSeconds(0.02, 600)
+      completionHandler:^(BOOL finished) { (void)finished; }];
+
+    IVLog(@"held before natural end at %.3f/%.3f", cur, dur);
 }
 
 /// 播到结尾时把控制层「叫回来」。
