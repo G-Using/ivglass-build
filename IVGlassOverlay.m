@@ -12,6 +12,12 @@ static const CGFloat kPillMaxWidth  = 560.0;  // 横屏时不要拉满
 static const CGFloat kCompactButton = 30.0;   // 胶囊里的播放 / 静音小圆钮
 static const CGFloat kTickInterval  = 0.08;
 
+/// 浅玻璃上的墨色（音量 HUD 的图标就是这种深灰）
+static inline UIColor *IVInk(void)      { return [UIColor colorWithWhite:0.10 alpha:0.85]; }
+static inline UIColor *IVInkSoft(void)  { return [UIColor colorWithWhite:0.10 alpha:0.50]; }
+static inline UIColor *IVTrackTint(void){ return [UIColor colorWithWhite:0.10 alpha:0.14]; }
+static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 alpha:0.75]; }
+
 @interface IVGlassOverlay () {
     // 底部胶囊
     IVGlassView *_pill;
@@ -80,7 +86,7 @@ static const CGFloat kTickInterval  = 0.08;
 
     // 进度槽
     _track = [[UIView alloc] initWithFrame:CGRectZero];
-    _track.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.26];
+    _track.backgroundColor = IVTrackTint();
     _track.layer.cornerRadius = 2.0;
     _track.clipsToBounds = NO;
     _track.userInteractionEnabled = NO;
@@ -88,17 +94,17 @@ static const CGFloat kTickInterval  = 0.08;
 
     // 进度填充
     _fill = [[UIView alloc] initWithFrame:CGRectZero];
-    _fill.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.96];
+    _fill.backgroundColor = IVFillTint();
     _fill.layer.cornerRadius = 2.0;
     _fill.userInteractionEnabled = NO;
     [_track addSubview:_fill];
 
     // 拖动圆点（展开时可见）
     _knob = [[UIView alloc] initWithFrame:CGRectZero];
-    _knob.backgroundColor = [UIColor colorWithWhite:1.0 alpha:1.0];
+    _knob.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.95];
     _knob.layer.cornerRadius = 8.0;
     _knob.layer.shadowColor = [UIColor blackColor].CGColor;
-    _knob.layer.shadowOpacity = 0.28;
+    _knob.layer.shadowOpacity = 0.22;
     _knob.layer.shadowRadius = 4.0;
     _knob.layer.shadowOffset = CGSizeMake(0, 1);
     _knob.hidden = YES;
@@ -107,14 +113,14 @@ static const CGFloat kTickInterval  = 0.08;
 
     // 播放 / 暂停（小）
     _playBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    _playBtn.tintColor = [UIColor colorWithWhite:1.0 alpha:0.96];
+    _playBtn.tintColor = IVInk();
     _playBtn.userInteractionEnabled = YES;
     [_playBtn addTarget:self action:@selector(onPlayPause) forControlEvents:UIControlEventTouchUpInside];
     [_pill.contentView addSubview:_playBtn];
 
     // 静音
     _muteBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    _muteBtn.tintColor = [UIColor colorWithWhite:1.0 alpha:0.92];
+    _muteBtn.tintColor = IVInkSoft();
     _muteBtn.userInteractionEnabled = YES;
     [_muteBtn addTarget:self action:@selector(onToggleMute) forControlEvents:UIControlEventTouchUpInside];
     [_pill.contentView addSubview:_muteBtn];
@@ -122,7 +128,7 @@ static const CGFloat kTickInterval  = 0.08;
     // 时间标签
     _lblLeft = [[UILabel alloc] initWithFrame:CGRectZero];
     _lblLeft.font = [UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightSemibold];
-    _lblLeft.textColor = [UIColor colorWithWhite:1.0 alpha:0.97];
+    _lblLeft.textColor = IVInk();
     _lblLeft.textAlignment = NSTextAlignmentLeft;
     _lblLeft.hidden = YES;
     _lblLeft.userInteractionEnabled = NO;
@@ -130,7 +136,7 @@ static const CGFloat kTickInterval  = 0.08;
 
     _lblRight = [[UILabel alloc] initWithFrame:CGRectZero];
     _lblRight.font = [UIFont monospacedDigitSystemFontOfSize:12.0 weight:UIFontWeightMedium];
-    _lblRight.textColor = [UIColor colorWithWhite:1.0 alpha:0.62];
+    _lblRight.textColor = IVInkSoft();
     _lblRight.textAlignment = NSTextAlignmentRight;
     _lblRight.hidden = YES;
     _lblRight.userInteractionEnabled = NO;
@@ -179,17 +185,17 @@ static const CGFloat kTickInterval  = 0.08;
     }
 
     _backBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    _backBtn.tintColor = [UIColor colorWithWhite:1.0 alpha:0.95];
+    _backBtn.tintColor = IVInk();
     [_backBtn addTarget:self action:@selector(onRewind) forControlEvents:UIControlEventTouchUpInside];
     [_backCircle.contentView addSubview:_backBtn];
 
     _playBig = [UIButton buttonWithType:UIButtonTypeCustom];
-    _playBig.tintColor = [UIColor colorWithWhite:1.0 alpha:1.0];
+    _playBig.tintColor = IVInk();
     [_playBig addTarget:self action:@selector(onPlayPause) forControlEvents:UIControlEventTouchUpInside];
     [_playCircle.contentView addSubview:_playBig];
 
     _fwdBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    _fwdBtn.tintColor = [UIColor colorWithWhite:1.0 alpha:0.95];
+    _fwdBtn.tintColor = IVInk();
     [_fwdBtn addTarget:self action:@selector(onForward) forControlEvents:UIControlEventTouchUpInside];
     [_fwdCircle.contentView addSubview:_fwdBtn];
 }
@@ -221,7 +227,7 @@ static const CGFloat kTickInterval  = 0.08;
     CGFloat pillH = _expanded ? kPillHExpanded : kPillHCompact;
     CGFloat pillW = MIN(W - kPillSide * 2.0, kPillMaxWidth);
     CGFloat pillX = (W - pillW) / 2.0;
-    CGFloat gap   = _expanded ? 20.0 : 14.0;
+    CGFloat gap   = _expanded ? 42.0 : 26.0;   // 往上抬，别压着 home 横条
     CGFloat pillY = H - safeBottom - pillH - gap;
 
     _pill.frame = CGRectMake(pillX, pillY, pillW, pillH);
@@ -460,7 +466,7 @@ static const CGFloat kTickInterval  = 0.08;
     _hideCenterTimer = nil;
 
     __weak typeof(self) ws = self;
-    [UIView animateWithDuration:animated ? 0.22 : 0.0
+    [UIView animateWithDuration:animated ? 0.15 : 0.0
                           delay:0.0
                         options:UIViewAnimationOptionBeginFromCurrentState
                      animations:^{
@@ -471,7 +477,7 @@ static const CGFloat kTickInterval  = 0.08;
     } completion:nil];
 
     if (autoHide) {
-        _hideCenterTimer = [NSTimer scheduledTimerWithTimeInterval:3.0
+        _hideCenterTimer = [NSTimer scheduledTimerWithTimeInterval:4.5
                                                             target:self
                                                           selector:@selector(onCenterHideTimer)
                                                           userInfo:nil
@@ -485,14 +491,14 @@ static const CGFloat kTickInterval  = 0.08;
     _hideCenterTimer = nil;
 
     __weak typeof(self) ws = self;
-    [UIView animateWithDuration:animated ? 0.2 : 0.0
+    [UIView animateWithDuration:animated ? 0.13 : 0.0
                           delay:0.0
                         options:UIViewAnimationOptionBeginFromCurrentState
                      animations:^{
         __strong typeof(ws) s = ws;
         if (!s) return;
         s->_centerWrap.alpha = 0.0;
-        s->_centerWrap.transform = CGAffineTransformMakeScale(0.9, 0.9);
+        s->_centerWrap.transform = CGAffineTransformMakeScale(0.92, 0.92);
     } completion:nil];
 }
 
@@ -620,7 +626,7 @@ static const CGFloat kTickInterval  = 0.08;
     }
 
     __weak typeof(self) ws = self;
-    [UIView animateWithDuration:0.34
+    [UIView animateWithDuration:0.30
                           delay:0.0
          usingSpringWithDamping:0.82
           initialSpringVelocity:0.4
