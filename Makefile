@@ -6,7 +6,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = IVGlassPlayer
 
-IVGlassPlayer_FILES = Tweak.xm IVGlassKit.m IVGlassOverlay.m IVPlayerWatcher.m
+IVGlassPlayer_FILES = Tweak.xm IVGlassKit.m IVGlassOverlay.m IVPlayerWatcher.m IVHostBridge.m
 IVGlassPlayer_FRAMEWORKS = UIKit AVFoundation QuartzCore
 IVGlassPlayer_CFLAGS = -fobjc-arc
 

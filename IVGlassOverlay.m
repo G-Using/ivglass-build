@@ -1,5 +1,6 @@
 #import "IVGlassOverlay.h"
 #import "IVGlassKit.h"
+#import "IVHostBridge.h"
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
 
@@ -56,6 +57,8 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     UITapGestureRecognizer  *_winTap;
     NSTimeInterval           _lastTapTime;
 }
+/// 播放 / 暂停：优先交给宿主状态机，保证原生那条控制栏跟着变
+- (void)setPlayingViaHost:(BOOL)wantPlay;
 @end
 
 @implementation IVGlassOverlay
@@ -607,25 +610,63 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
 #pragma mark - 动作
 
+/// 播放 / 暂停统一入口。
+///
+/// 直接 `[player pause]` 的问题是：画面停住了，但相册自己的状态机
+/// （`PUBrowsingVideoPlayer.desiredPlayState`）还认为在播，
+/// 底部那条原生控制栏就不会把图标切成「播放」—— 用户看到的就是
+/// 「插件暂停了，原生不跟随」。所以先请求宿主，宿主不理我们才自己动手。
+- (void)setPlayingViaHost:(BOOL)wantPlay {
+    AVPlayer *p = self.player;
+    if (!p) return;
+
+    UIWindow *win = _boundWindow ?: self.window;
+    BOOL viaHost = IVHostSetPlaying(win, wantPlay, p);
+
+    if (!viaHost) {
+        if (wantPlay) [p play]; else [p pause];
+        return;
+    }
+
+    // 宿主接下了，但各家实现不一定会立刻执行（有的等一次 runloop / 动画）。
+    // 0.45s 后核对一次，真的没动就补一刀，保证按键一定有反应。
+    __weak typeof(self) ws = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        __strong typeof(ws) s = ws;
+        if (s == nil) return;
+        AVPlayer *pp = s.player;
+        if (pp == nil) return;
+        if ([s isPlaying] == wantPlay) return;
+
+        IVLog(@"host bridge 没生效（want=%d），直接操作 player", wantPlay);
+        if (wantPlay) [pp play]; else [pp pause];
+        [s updatePlayState];
+    });
+}
+
 - (void)onPlayPause {
     AVPlayer *p = self.player;
     if (!p) return;
 
     if ([self isPlaying]) {
-        [p pause];
+        [self setPlayingViaHost:NO];
     } else if ([self isAtEnd]) {
         // 播完之后点播放 = 从头再放一遍（而不是卡在结尾原地不动）
         _currentValue = 0.0;
         [self applyProgressValue];
+        __weak typeof(self) ws = self;
         [p seekToTime:kCMTimeZero
       toleranceBefore:kCMTimeZero
            toleranceAfter:kCMTimeZero
         completionHandler:^(BOOL finished) {
             (void)finished;
-            [p play];
+            __strong typeof(ws) s = ws;
+            if (s == nil) return;
+            [s setPlayingViaHost:YES];
         }];
     } else {
-        [p play];
+        [self setPlayingViaHost:YES];
     }
     IVHaptic();
     [self updatePlayState];
@@ -634,7 +675,12 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 - (void)onToggleMute {
     AVPlayer *p = self.player;
     if (!p) return;
-    p.muted = !p.muted;
+
+    BOOL target = !p.muted;
+    // 静音同理：走宿主的 setMuted:，原生那条栏的音量图标才会跟着换
+    if (!IVHostSetMuted(_boundWindow ?: self.window, target)) {
+        p.muted = target;
+    }
     IVHaptic();
     [self updateMuteState];
 }
