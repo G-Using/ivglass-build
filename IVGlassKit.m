@@ -5,10 +5,12 @@
 
 @implementation IVGlassView {
     CAGradientLayer *_sheen;
+    UIView          *_tint;
 }
 
 - (instancetype)initWithRadius:(CGFloat)radius {
-    UIBlurEffect *effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    // 音量 HUD 同款材质：跟随明暗模式，浅色环境下呈浅灰白玻璃
+    UIBlurEffect *effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterial];
     self = [super initWithEffect:effect];
     if (!self) return nil;
 
@@ -16,21 +18,28 @@
     self.layer.cornerRadius = radius;
     self.clipsToBounds = YES;
 
-    // 玻璃边缘：一条 0.7pt 的半透明白描边，是 Liquid Glass 最关键的辨识特征
+    // 玻璃边缘：细白描边
     self.layer.borderWidth = 0.7;
-    self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.16].CGColor;
+    self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.55].CGColor;
+
+    // 白色提亮层，贴近音量条的浅玻璃观感
+    _tint = [[UIView alloc] initWithFrame:CGRectZero];
+    _tint.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.30];
+    _tint.userInteractionEnabled = NO;
+    [_tint.layer removeFromSuperlayer];
+    [self.contentView addSubview:_tint];
 
     // 顶部高光 + 底部压暗，让平面色块产生「曲面玻璃」的体积感
     _sheen = [CAGradientLayer layer];
     _sheen.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:0.18].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.05].CGColor,
-        (id)[UIColor colorWithWhite:0.0 alpha:0.10].CGColor
+        (id)[UIColor colorWithWhite:1.0 alpha:0.35].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.08].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.06].CGColor
     ];
     _sheen.locations = @[@0.0, @0.52, @1.0];
     _sheen.startPoint = CGPointMake(0.5, 0.0);
     _sheen.endPoint = CGPointMake(0.5, 1.0);
-    [self.contentView.layer insertSublayer:_sheen atIndex:0];
+    [self.contentView.layer addSublayer:_sheen];
 
     return self;
 }
@@ -44,6 +53,7 @@
 
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    _tint.frame = self.bounds;
     _sheen.frame = self.bounds;
     [CATransaction commit];
 
@@ -111,10 +121,10 @@ void IVGlassStyleExistingView(UIView *view, CGFloat cornerRadius) {
     layer.cornerRadius = cornerRadius;
     layer.masksToBounds = YES;
     layer.borderWidth = 0.7;
-    layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
+    layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.55].CGColor;
 
-    // 毛玻璃垫底：盖在 view 自身背景之上、内容之下
-    UIBlurEffect *eff = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    // 毛玻璃垫底：盖在 view 自身背景之上、内容之下（音量 HUD 同款浅玻璃）
+    UIBlurEffect *eff = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterial];
     UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:eff];
     blur.userInteractionEnabled = NO;
     blur.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -125,18 +135,18 @@ void IVGlassStyleExistingView(UIView *view, CGFloat cornerRadius) {
     CAGradientLayer *sheen = [CAGradientLayer layer];
     sheen.frame = view.bounds;
     sheen.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:0.20].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.04].CGColor,
-        (id)[UIColor colorWithWhite:0.0 alpha:0.10].CGColor
+        (id)[UIColor colorWithWhite:1.0 alpha:0.35].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.08].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.06].CGColor
     ];
     sheen.locations = @[@0.0, @0.5, @1.0];
     sheen.startPoint = CGPointMake(0.5, 0.0);
     sheen.endPoint = CGPointMake(0.5, 1.0);
     [view.layer insertSublayer:sheen atIndex:0];
 
-    // 原背景若是纯色胶囊，压透明让毛玻璃透出来
+    // 原背景若是纯色胶囊，压淡让毛玻璃透出来
     if (view.backgroundColor != nil) {
-        view.backgroundColor = [view.backgroundColor colorWithAlphaComponent:0.18];
+        view.backgroundColor = [view.backgroundColor colorWithAlphaComponent:0.15];
     }
 
     objc_setAssociatedObject(view, kIVGlassAppliedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
