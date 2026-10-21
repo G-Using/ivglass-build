@@ -79,7 +79,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     _videoRect = CGRectZero;
     _lastTapTime = 0.0;
 
-    IVLog(@"=== IVGlassPlayer 0.6.4 overlay init ===");
+    IVLog(@"=== IVGlassPlayer 0.6.5 overlay init ===");
 
     return self;
 }
@@ -213,6 +213,10 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
     // 注意：这里不做 early-return。胶囊和中央按钮必须每次都按同一个值落 alpha，
     // 中途被别的动画打断过一次就可能一个到 0、一个停在 0.3，之后再也对不齐。
+    //
+    // 也不要给 _centerWrap 加 scale 动画：它带着 transform 时，layoutSubviews
+    // 里再设 frame 会被 UIKit 反算 center，于是「淡出时整组往右挪一下」。
+    // 纯 alpha 过渡没有这个问题。
     __weak typeof(self) ws = self;
     [UIView animateWithDuration:animated ? 0.18 : 0.0
                           delay:0.0
@@ -222,8 +226,6 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
         if (!s) return;
         s->_pill.alpha = visible ? 1.0 : 0.0;
         s->_centerWrap.alpha = visible ? 1.0 : 0.0;
-        s->_centerWrap.transform = visible ? CGAffineTransformIdentity
-                                           : CGAffineTransformMakeScale(0.92, 0.92);
     } completion:nil];
 }
 
@@ -413,9 +415,9 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     CGFloat pillH = _expanded ? kPillHExpanded : kPillHCompact;
     CGFloat pillW = MIN(W - kPillSide * 2.0, kPillMaxWidth);
     CGFloat pillX = (W - pillW) / 2.0;
-    // 抬到相册底部那排缩略图条（可滑动选择的那排）上方，不压原生操作栏
-    // 96 是「只有工具栏」时的间距；现在缩略图条恢复了，得再让出它的高度
-    CGFloat gap   = _expanded ? 160.0 : 140.0;
+    // 抬到相册底部那排缩略图条（可滑动选择的那排）上方，不压原生操作栏。
+    // 140 是「再往上让一格」的量，实际看着离缩略图条有点远，往回收 14pt 更贴。
+    CGFloat gap   = _expanded ? 146.0 : 126.0;
     CGFloat pillY = H - safeBottom - pillH - gap;
 
     CGFloat minY = (self.safeAreaInsets.top > 0.0 ? self.safeAreaInsets.top : 0.0) + 8.0;
@@ -494,6 +496,9 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     // 居中到「画面」而不是「整窗」：视频被 letterbox 时按钮才会跟着画面走
     CGFloat midY = CGRectIsEmpty(area) ? self.bounds.size.height / 2.0 : CGRectGetMidY(area);
 
+    // 排版前先把 transform 复位：带着非单位 transform 去设 frame，
+    // UIKit 会按 frame/transform 反算 center，位置就会漂。
+    _centerWrap.transform = CGAffineTransformIdentity;
     _centerWrap.frame = CGRectMake(originX - gap * 0.4,
                                    midY - midD / 2.0 - gap * 0.4,
                                    totalW + gap * 0.8,
@@ -571,6 +576,17 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     return (isfinite(s) && s > 0.0) ? s : 0.0;
 }
 
+/// 是否已经播到结尾（播放结束时相册会停在最后一帧，player 仍是 paused 状态）
+- (BOOL)isAtEnd {
+    AVPlayer *p = self.player;
+    if (!p) return NO;
+    double dur = [self mediaDuration];
+    if (dur <= 0.5) return NO;
+    double cur = CMTimeGetSeconds(p.currentTime);
+    if (!isfinite(cur) || cur < 0.0) return NO;
+    return (cur >= dur - 0.30);
+}
+
 - (void)updatePlayState {
     UIImage *small = IVSymbol([self isPlaying] ? @"pause.fill" : @"play.fill",
                               17.0, UIFontWeightBold);
@@ -596,6 +612,17 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
     if ([self isPlaying]) {
         [p pause];
+    } else if ([self isAtEnd]) {
+        // 播完之后点播放 = 从头再放一遍（而不是卡在结尾原地不动）
+        _currentValue = 0.0;
+        [self applyProgressValue];
+        [p seekToTime:kCMTimeZero
+      toleranceBefore:kCMTimeZero
+           toleranceAfter:kCMTimeZero
+        completionHandler:^(BOOL finished) {
+            (void)finished;
+            [p play];
+        }];
     } else {
         [p play];
     }

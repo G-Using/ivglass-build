@@ -93,6 +93,26 @@ static BOOL IVSubtreeShowsStaticImage(UIView *v, UIWindow *win, int depth, int *
     return NO;
 }
 
+/// 播放是否已经到结尾。
+/// 播完之后相册会停在最后一帧（往往是一张静止的快照），player 变 paused ——
+/// 这时候遮挡判定会误以为「已经切到别的照片」，把 overlay 拆掉，
+/// 于是用户再点画面就什么也唤不出来。结尾状态必须豁免。
+static BOOL IVPlayerNearEnd(AVPlayer *p) {
+    if (p == nil) return NO;
+    AVPlayerItem *item = p.currentItem;
+    if (item == nil) return NO;
+
+    CMTime d = item.duration;
+    if (!CMTIME_IS_NUMERIC(d)) return NO;
+    double ds = CMTimeGetSeconds(d);
+    if (ds <= 0.2) return NO;
+
+    double cs = CMTimeGetSeconds(p.currentTime);
+    if (!isfinite(cs) || cs < 0.0) return NO;
+
+    return (cs >= ds - 0.40);
+}
+
 /// 在视频视图之上，找有没有一个「盖住大半个屏幕、而且里面是一张静态图」的兄弟视图。
 static UIView *IVPageOccluder(UIView *videoView, UIWindow *win) {
     if (videoView == nil || win == nil) return nil;
@@ -374,7 +394,9 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 
         // 只在「播放器已暂停」时判定：切页时相册一定会暂停；正在播的时候
         // 上层的过渡快照会造成误杀，所以播放中直接认为它在前台。
-        if (vv != nil && l.player.rate == 0.0) {
+        // 播完停在最后一帧时也必须豁免（IVPlayerNearEnd），否则结尾画面会被
+        // 当成「被别的照片盖住」，overlay 拆掉后再点画面就唤不出来了。
+        if (vv != nil && l.player.rate == 0.0 && !IVPlayerNearEnd(l.player)) {
             UIView *occluder = IVPageOccluder(vv, w);
             if (occluder != nil) {
                 IVLog(@"skip occluded layer (%@ under %@)",
