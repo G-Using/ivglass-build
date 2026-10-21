@@ -22,6 +22,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)startTracking;
 - (void)stopTracking;
 
+/// 绑定宿主窗口（安装「点画面切换显隐」的全屏 tap）。
+/// tap 挂在 window 上且不消费触摸，因此不会影响相册的左右滑切图。
+- (void)bindWindow:(UIWindow *)window;
+- (void)unbindWindow;
+
 @end
 
 NS_ASSUME_NONNULL_END
