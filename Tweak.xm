@@ -32,3 +32,14 @@
 }
 
 %end
+
+%ctor {
+    // 进程白名单：视频壁纸会让 SpringBoard 里出现全屏 AVPlayerLayer，
+    // Filter.plist 拦不住的场景在这里兜底 —— 不是目标 App 就完全不启用 hook。
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if (![bid isEqualToString:@"com.apple.mobileslideshow"] &&
+        ![bid isEqualToString:@"com.apple.DocumentsApp"]) {
+        return;
+    }
+    %init(_ungrouped);
+}
