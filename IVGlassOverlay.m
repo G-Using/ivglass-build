@@ -18,7 +18,7 @@ static inline UIColor *IVInkSoft(void)  { return [UIColor colorWithWhite:0.10 al
 static inline UIColor *IVTrackTint(void){ return [UIColor colorWithWhite:0.10 alpha:0.14]; }
 static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 alpha:0.75]; }
 
-@interface IVGlassOverlay () {
+@interface IVGlassOverlay () <UIGestureRecognizerDelegate> {
     // 底部胶囊
     IVGlassView *_pill;
     UIView      *_track;
@@ -41,9 +41,14 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     // 状态
     double       _currentValue;    // 0..1
     BOOL         _dragging;
-    BOOL         _centersVisible;
+    BOOL         _centersVisible;  // 中央按钮（在总开关之下）
+    BOOL         _chromeVisible;   // 总开关：胶囊 + 中央按钮
     NSTimer     *_tickTimer;
     NSTimer     *_collapseTimer;
+
+    // 全屏点击切换
+    UIWindow                *_boundWindow;
+    UITapGestureRecognizer  *_winTap;
 }
 @end
 
@@ -65,6 +70,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     _currentValue = 0.0;
     _expanded = NO;
     _centersVisible = YES;   // 中央按钮常驻，播放中始终可见
+    _chromeVisible = YES;    // 整体默认可见
 
     return self;
 }
@@ -72,6 +78,81 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 - (void)dealloc {
     [_tickTimer invalidate];
     [_collapseTimer invalidate];
+    if (_winTap != nil) {
+        [_winTap.view removeGestureRecognizer:_winTap];
+        _winTap = nil;
+    }
+}
+
+#pragma mark - 全屏点击切换（挂在 window 上，不消费触摸）
+
+- (void)bindWindow:(UIWindow *)window {
+    if (window == nil) return;
+    if (_winTap != nil && _boundWindow == window) return;
+
+    [self unbindWindow];
+    _boundWindow = window;
+
+    UITapGestureRecognizer *t =
+        [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onWindowTap:)];
+    t.cancelsTouchesInView = NO;   // 关键：不吞触摸，相册的 swipe 照常
+    t.delaysTouchesEnded = NO;
+    t.delegate = self;
+    [window addGestureRecognizer:t];
+    _winTap = t;
+}
+
+- (void)unbindWindow {
+    if (_winTap != nil) {
+        [_winTap.view removeGestureRecognizer:_winTap];
+        _winTap = nil;
+    }
+    _boundWindow = nil;
+}
+
+/// 只接「画面空白处」的点击：按钮、导航栏、工具栏、自己的控件都放过。
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+       shouldReceiveTouch:(UITouch *)touch {
+    if (gestureRecognizer != _winTap) return YES;
+
+    UIView *v = touch.view;
+    if (v == nil) return NO;
+    if (v == self || [v isDescendantOfView:self]) return NO;
+
+    UIView *p = v;
+    int guard = 0;
+    while (p != nil && guard < 24) {
+        if ([p isKindOfClass:[UIControl class]]) return NO;
+        if ([p isKindOfClass:[UINavigationBar class]]) return NO;
+        if ([p isKindOfClass:[UIToolbar class]]) return NO;
+        if ([p isKindOfClass:[UITabBar class]]) return NO;
+        p = p.superview;
+        guard++;
+    }
+    return YES;
+}
+
+- (void)onWindowTap:(UITapGestureRecognizer *)g {
+    if (g.state != UIGestureRecognizerStateEnded) return;
+    [self setChromeVisible:!_chromeVisible animated:YES];
+}
+
+- (void)setChromeVisible:(BOOL)visible animated:(BOOL)animated {
+    if (_chromeVisible == visible) return;
+    _chromeVisible = visible;
+
+    __weak typeof(self) ws = self;
+    [UIView animateWithDuration:animated ? 0.18 : 0.0
+                          delay:0.0
+                        options:UIViewAnimationOptionBeginFromCurrentState
+                     animations:^{
+        __strong typeof(ws) s = ws;
+        if (!s) return;
+        s->_pill.alpha = visible ? 1.0 : 0.0;
+        s->_centerWrap.alpha = (visible && s->_centersVisible) ? 1.0 : 0.0;
+        s->_centerWrap.transform = visible ? CGAffineTransformIdentity
+                                           : CGAffineTransformMakeScale(0.92, 0.92);
+    } completion:nil];
 }
 
 #pragma mark - 构建：底部胶囊
@@ -217,7 +298,8 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     CGFloat pillH = _expanded ? kPillHExpanded : kPillHCompact;
     CGFloat pillW = MIN(W - kPillSide * 2.0, kPillMaxWidth);
     CGFloat pillX = (W - pillW) / 2.0;
-    CGFloat gap   = _expanded ? 60.0 : 40.0;   // 明显往上抬，离 home 横条更远
+    // 抬到相册底部工具栏上方（截图中红框的位置），不压原生操作栏
+    CGFloat gap   = _expanded ? 116.0 : 96.0;
     CGFloat pillY = H - safeBottom - pillH - gap;
 
     _pill.frame = CGRectMake(pillX, pillY, pillW, pillH);
@@ -446,6 +528,11 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
         // 展开态不隐藏中央按钮
         return;
     }
+    if (!_chromeVisible) {
+        // 整体隐藏时，点胶囊先恢复整体
+        [self setChromeVisible:YES animated:YES];
+        return;
+    }
     _centersVisible = !_centersVisible;
 
     __weak typeof(self) ws = self;
@@ -659,11 +746,12 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.hidden || self.alpha < 0.05) return NO;
 
-    if (_centersVisible && !_centerWrap.hidden &&
-        CGRectContainsPoint(_centerWrap.frame, point)) {
+    if (_chromeVisible && _centersVisible && !_centerWrap.hidden &&
+        _centerWrap.alpha > 0.05 && CGRectContainsPoint(_centerWrap.frame, point)) {
         return YES;
     }
-    if (CGRectContainsPoint(_pill.frame, point)) {
+    if (_chromeVisible && _pill.alpha > 0.05 &&
+        CGRectContainsPoint(_pill.frame, point)) {
         return YES;
     }
     return NO;
