@@ -41,6 +41,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign, readonly) BOOL chromeVisible;
 - (void)setChromeVisible:(BOOL)visible animated:(BOOL)animated;
 
+/// 窗口坐标系里的某个点是否落在自己的控件上。
+/// 用来区分「在画面上横向拖动切图」和「按住胶囊拖时间轴」。
+- (BOOL)interceptsPoint:(CGPoint)point inWindow:(UIWindow *)window;
+
 @end
 
 NS_ASSUME_NONNULL_END

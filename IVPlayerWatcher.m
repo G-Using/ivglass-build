@@ -18,11 +18,23 @@ static BOOL IVNameLooksLikeChrome(NSString *name) {
     if ([name hasPrefix:@"_UI"]) return NO;          // UIKit 内部视图，不碰
     if ([name hasPrefix:@"UI"]) return NO;
 
+    // 【硬排除】相册底部那排「可滑动的缩略图条」就是 scrubber 家族，
+    // 用户明说要它，压掉就变成一条空白。这里先挡掉，再看白名单。
+    static NSArray<NSString *> *banned = nil;
+    static dispatch_once_t once2;
+    dispatch_once(&once2, ^{
+        banned = @[ @"Scrub", @"Filmstrip", @"FilmStrip", @"ThumbnailStrip" ];
+    });
+    for (NSString *k in banned) {
+        if ([name rangeOfString:k options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return NO;
+        }
+    }
+
     static NSArray<NSString *> *keys = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        keys = @[ @"PlaybackControl", @"PlaybackScrub", @"Scrubber",
-                  @"TimelineScrub", @"PlayPauseButton", @"PlayButtonTile",
+        keys = @[ @"PlaybackControl", @"PlayPauseButton", @"PlayButtonTile",
                   @"PlayerControls", @"VideoControlsView" ];
     });
 
@@ -49,6 +61,69 @@ static BOOL IVLayerIsVisible(AVPlayerLayer *layer) {
         guard++;
     }
     return YES;
+}
+
+#pragma mark - 遮挡检测（几何判断抓不到的那一半）
+
+/// 子树里是否存在「一块铺满屏幕的静态图像」——也就是另一张照片页。
+/// 相册翻页时旧页不会被移出层级，只是被新页盖住：几何上它仍然全屏，
+/// 所以只能靠「它上面压着一个有内容的全屏兄弟」来判定它已经不在前台。
+static BOOL IVSubtreeShowsStaticImage(UIView *v, UIWindow *win, int depth, int *budget) {
+    if (v == nil || depth > 6 || budget == NULL || *budget <= 0) return NO;
+    (*budget)--;
+    if (v.hidden || v.alpha < 0.30) return NO;
+
+    CGFloat winArea = win.bounds.size.width * win.bounds.size.height;
+    if (winArea < 1.0) return NO;
+
+    CGRect f = [v convertRect:v.bounds toView:win];
+    CGFloat area = f.size.width * f.size.height;
+
+    if (area >= winArea * 0.45) {
+        // 有画面内容（UIImageView / 直接 setContents 的自绘视图）
+        if (v.layer.contents != nil) return YES;
+
+        CGColorRef bg = v.backgroundColor.CGColor;
+        if (bg != NULL && CGColorGetAlpha(bg) > 0.9 && v.subviews.count == 0) return YES;
+    }
+
+    for (UIView *s in v.subviews) {
+        if (IVSubtreeShowsStaticImage(s, win, depth + 1, budget)) return YES;
+    }
+    return NO;
+}
+
+/// 在视频视图之上，找有没有一个「盖住大半个屏幕、而且里面是一张静态图」的兄弟视图。
+static UIView *IVPageOccluder(UIView *videoView, UIWindow *win) {
+    if (videoView == nil || win == nil) return nil;
+
+    UIView *child = videoView;
+    UIView *parent = videoView.superview;
+    int guard = 0;
+
+    while (parent != nil && guard < 24) {
+        NSArray<UIView *> *subs = parent.subviews;
+        NSUInteger idx = [subs indexOfObjectIdenticalTo:child];
+        if (idx != NSNotFound) {
+            for (NSUInteger i = idx + 1; i < subs.count; i++) {
+                UIView *sib = subs[i];
+                if (sib.hidden || sib.alpha < 0.5) continue;
+
+                CGRect f = [sib convertRect:sib.bounds toView:win];
+                if (f.size.width < win.bounds.size.width * 0.85) continue;
+                if (f.size.height < win.bounds.size.height * 0.55) continue;
+
+                int budget = 1200;   // 这次扫描的视图访问预算，防止极端层级下卡主线程
+                if (IVSubtreeShowsStaticImage(sib, win, 0, &budget)) return sib;
+            }
+        }
+
+        if (parent == win) break;
+        child = parent;
+        parent = parent.superview;
+        guard++;
+    }
+    return nil;
 }
 
 /// 递归收集「看起来像原生播放控件」的视图；命中后不再往子层钻。
@@ -126,6 +201,12 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     // 必须记下来，卸载 overlay 时还原 —— 否则切到照片后底部工具栏会一直是透明的。
     NSMapTable<UIView *, NSNumber *> *_suppressed;
     CGRect                        _syncedVideoRect;
+    // 遮挡判定：被别的页面盖住的那个 layer，以及连续命中的次数（防瞬时快照误判）
+    __weak AVPlayerLayer         *_occludedLayer;
+    int                           _occludedScans;
+    // 翻页手势期间先把控制层藏起来，松手后再恢复
+    NSTimer                      *_reshowTimer;
+    BOOL                          _hiddenByDrag;
 }
 
 - (void)scan;
@@ -133,6 +214,7 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
                     inWindow:(UIWindow *)win
                    videoRect:(CGRect)videoRect;
 - (void)restoreNativeChrome;
+- (void)scheduleReshowIfNeeded;
 @end
 
 @implementation IVPlayerWatcher
@@ -204,10 +286,11 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
         return;
     }
 
-    AVPlayerLayer *best = nil;
-    CGFloat bestArea = 0.0;
-    UIWindow *bestWindow = nil;
-    CGRect bestRect = CGRectZero;
+    // ---- 第一道：几何筛选，收集候选 ----
+    NSMutableArray<AVPlayerLayer *> *cands   = [NSMutableArray array];
+    NSMutableArray<NSValue *>        *rects   = [NSMutableArray array];
+    NSMutableArray<NSValue *>        *wins    = [NSMutableArray array];
+    NSMutableArray<NSNumber *>       *areas   = [NSMutableArray array];
 
     for (AVPlayerLayer *l in snapshot) {
         if (l == nil) continue;
@@ -251,18 +334,75 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
         CGFloat cx = CGRectGetMidX(clip);
         if (fabs(cx - CGRectGetMidX(win.bounds)) > screen.width * 0.20) continue;
 
-        if (clipArea > bestArea) {
-            bestArea = clipArea;
-            best = l;
-            bestWindow = win;
-            bestRect = r;
-        }
+        [cands addObject:l];
+        [rects addObject:[NSValue valueWithCGRect:r]];
+        [wins  addObject:[NSValue valueWithNonretainedObject:win]];
+        [areas addObject:@(clipArea)];
     }
 
-    if (best == nil || bestWindow == nil) {
+    if (cands.count == 0) {
         [self teardownOverlay];
         return;
     }
+
+    // ---- 第二道：遮挡判定 ----
+    // 相册翻页结束后，旧视频页并没有被移出层级、也依然全屏，纯几何判断抓不到。
+    // 但它上面会压着新页（一张铺满屏幕的静态图），从这里认。
+    // 按面积从大到小试，取第一个「没有被压住」的候选 —— 这样视频滑到视频时
+    // 能自动切到新那一个，而不是抱着后面那个已经看不见的。
+    NSMutableArray<NSNumber *> *order = [NSMutableArray array];
+    for (NSUInteger i = 0; i < cands.count; i++) [order addObject:@(i)];
+    [order sortUsingComparator:^NSComparisonResult(NSNumber *a, NSNumber *b) {
+        CGFloat av = [areas[a.unsignedIntegerValue] doubleValue];
+        CGFloat bv = [areas[b.unsignedIntegerValue] doubleValue];
+        if (av > bv) return NSOrderedAscending;
+        if (av < bv) return NSOrderedDescending;
+        return NSOrderedSame;
+    }];
+
+    AVPlayerLayer *best = nil;
+    UIWindow *bestWindow = nil;
+    CGRect bestRect = CGRectZero;
+
+    for (NSNumber *idx in order) {
+        NSUInteger i = idx.unsignedIntegerValue;
+        AVPlayerLayer *l = cands[i];
+        UIWindow *w = [wins[i] nonretainedObjectValue];
+
+        UIView *vv = nil;
+        if ([l.delegate isKindOfClass:[UIView class]]) vv = (UIView *)l.delegate;
+
+        // 只在「播放器已暂停」时判定：切页时相册一定会暂停；正在播的时候
+        // 上层的过渡快照会造成误杀，所以播放中直接认为它在前台。
+        if (vv != nil && l.player.rate == 0.0) {
+            UIView *occluder = IVPageOccluder(vv, w);
+            if (occluder != nil) {
+                IVLog(@"skip occluded layer (%@ under %@)",
+                      NSStringFromClass([vv class]), NSStringFromClass([occluder class]));
+                continue;
+            }
+        }
+
+        best = l;
+        bestWindow = w;
+        bestRect = [rects[i] CGRectValue];
+        break;
+    }
+
+    if (best == nil) {
+        // 所有候选都被别的页面盖住了：说明已经不在视频页，只是 player 还活着。
+        // 连续两次命中才动手，避开翻页动画里的瞬时快照。
+        _occludedScans++;
+        if (_occludedScans >= 2) {
+            if (_overlay != nil) IVLog(@"teardown: every candidate layer is occluded");
+            _occludedLayer = cands.firstObject;
+            [self teardownOverlay];
+        }
+        return;
+    }
+
+    _occludedScans = 0;
+    _occludedLayer = nil;
 
     [self mountOverlayForLayer:best inWindow:bestWindow videoRect:bestRect];
 
@@ -290,16 +430,39 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     static UITouch *sTracked = nil;
     static CGPoint sStart = {0.0, 0.0};
     static NSTimeInterval sStartTime = 0.0;
+    static BOOL sOnOwnControl = NO;
 
     if (t.phase == UITouchPhaseBegan) {
         sTracked = t;
         sStart = [t locationInView:window];
         sStartTime = t.timestamp;
+        sOnOwnControl = [_overlay interceptsPoint:sStart inWindow:window];
         return;
     }
 
     if (t.phase == UITouchPhaseCancelled) {
         if (sTracked == t) sTracked = nil;
+        [self scheduleReshowIfNeeded];
+        return;
+    }
+
+    if (t.phase == UITouchPhaseMoved) {
+        if (sTracked != t || sOnOwnControl || _hiddenByDrag) return;
+
+        CGPoint p = [t locationInView:window];
+        CGFloat dx = p.x - sStart.x;
+        CGFloat dy = p.y - sStart.y;
+
+        // 手指一横向拖开就先把控制层收起来。
+        // 相册翻页时视频内容会跟着手走，而 overlay 挂在 window 上不会动，
+        // 不收起来就会看到按钮「飘在」正在滑入的那张照片上 —— 这就是所谓的错位。
+        if (fabs(dx) > 12.0 && fabs(dx) > fabs(dy)) {
+            _hiddenByDrag = YES;
+            IVGlassOverlay *ov = _overlay;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [ov setChromeVisible:NO animated:YES];
+            });
+        }
         return;
     }
 
@@ -314,7 +477,10 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     NSTimeInterval dt = t.timestamp - sStartTime;
 
     // 短按 + 几乎无位移 = tap（滑动切图不会被判成 tap）
-    if (dx > 14.0 || dy > 14.0 || dt > 0.35) return;
+    if (dx > 14.0 || dy > 14.0 || dt > 0.35) {
+        [self scheduleReshowIfNeeded];
+        return;
+    }
 
     IVGlassOverlay *ov = _overlay;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -323,6 +489,26 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 }
 
 #pragma mark - 挂载 / 卸载
+
+/// 翻页结束后把控制层恢复出来（仅在还停留在视频页时才有意义）。
+/// 延迟 0.65s：这期间若已切到照片，遮挡判定会把 overlay 卸掉，这里就什么都不做。
+- (void)scheduleReshowIfNeeded {
+    if (!_hiddenByDrag) return;
+    _hiddenByDrag = NO;
+
+    [_reshowTimer invalidate];
+    __weak typeof(self) ws = self;
+    _reshowTimer = [NSTimer scheduledTimerWithTimeInterval:0.65
+                                                   repeats:NO
+                                                     block:^(NSTimer *t) {
+        __strong typeof(ws) s = ws;
+        if (!s) return;
+        s->_reshowTimer = nil;
+        IVGlassOverlay *ov = s->_overlay;
+        if (ov == nil) return;
+        [ov setChromeVisible:YES animated:YES];
+    }];
+}
 
 - (void)mountOverlayForLayer:(AVPlayerLayer *)layer
                     inWindow:(UIWindow *)win
@@ -403,6 +589,12 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 
 - (void)teardownOverlay {
     [self restoreNativeChrome];
+
+    [_reshowTimer invalidate];
+    _reshowTimer = nil;
+    _hiddenByDrag = NO;
+    // 注意：不要在这里重置 _occludedScans —— 遮挡期间每次扫描都会走 teardown，
+    // 一重置就会变成「卸载→重挂→卸载」的闪烁。它只在 scan 判定「未被遮挡」时归零。
 
     if (_overlay == nil) {
         _boundLayer = nil;

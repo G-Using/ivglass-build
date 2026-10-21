@@ -79,7 +79,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     _videoRect = CGRectZero;
     _lastTapTime = 0.0;
 
-    IVLog(@"=== IVGlassPlayer 0.6.3 overlay init ===");
+    IVLog(@"=== IVGlassPlayer 0.6.4 overlay init ===");
 
     return self;
 }
@@ -413,8 +413,9 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     CGFloat pillH = _expanded ? kPillHExpanded : kPillHCompact;
     CGFloat pillW = MIN(W - kPillSide * 2.0, kPillMaxWidth);
     CGFloat pillX = (W - pillW) / 2.0;
-    // 抬到相册底部工具栏上方（截图中红框的位置），不压原生操作栏
-    CGFloat gap   = _expanded ? 116.0 : 96.0;
+    // 抬到相册底部那排缩略图条（可滑动选择的那排）上方，不压原生操作栏
+    // 96 是「只有工具栏」时的间距；现在缩略图条恢复了，得再让出它的高度
+    CGFloat gap   = _expanded ? 160.0 : 140.0;
     CGFloat pillY = H - safeBottom - pillH - gap;
 
     CGFloat minY = (self.safeAreaInsets.top > 0.0 ? self.safeAreaInsets.top : 0.0) + 8.0;
@@ -861,6 +862,17 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 }
 
 #pragma mark - 触摸穿透
+
+- (BOOL)interceptsPoint:(CGPoint)point inWindow:(UIWindow *)window {
+    if (window == nil) return NO;
+    if (self.hidden || self.alpha < 0.05) return NO;
+    if (!_chromeVisible) return NO;
+
+    CGPoint p = [self convertPoint:point fromView:window];
+    if (_pill.alpha > 0.05 && CGRectContainsPoint(_pill.frame, p)) return YES;
+    if (_centerWrap.alpha > 0.05 && CGRectContainsPoint(_centerWrap.frame, p)) return YES;
+    return NO;
+}
 
 /// 只在 pill / 中央按钮组上命中，画面其余区域穿透（保留相册原生 swipe 切图）。
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
