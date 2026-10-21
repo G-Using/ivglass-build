@@ -27,6 +27,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)bindWindow:(UIWindow *)window;
 - (void)unbindWindow;
 
+/// 外部观察到的一次有效点击（来自 window sendEvent 的短按检测）。
+/// 与 window tap 互为兜底，内部有去重。
+- (void)handleExternalTapAt:(CGPoint)point inView:(UIView *)view;
+
 @end
 
 NS_ASSUME_NONNULL_END
