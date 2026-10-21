@@ -58,6 +58,41 @@ static void IVCollectChrome(UIView *root, UIView *skip, CGFloat maxDim,
     }
 }
 
+#pragma mark - 窗口定位
+
+/// CALayer 没有 window 属性：沿 superlayer 走到根层，再到各 UIWindowScene 里比对。
+static NSArray<UIWindow *> *IVAllWindows(void) {
+    NSMutableArray<UIWindow *> *arr = [NSMutableArray array];
+    UIApplication *app = [UIApplication sharedApplication];
+    for (UIScene *sc in app.connectedScenes) {
+        if (![sc isKindOfClass:[UIWindowScene class]]) continue;
+        UIWindowScene *ws = (UIWindowScene *)sc;
+        [arr addObjectsFromArray:ws.windows];
+    }
+    return arr;
+}
+
+static UIWindow *IVWindowForLayer(CALayer *layer) {
+    if (layer == nil) return nil;
+
+    CALayer *root = layer;
+    int guard = 0;
+    while (root.superlayer != nil && guard < 128) {
+        root = root.superlayer;
+        guard++;
+    }
+
+    for (UIWindow *w in IVAllWindows()) {
+        if (w.layer == root) return w;
+    }
+
+    id del = layer.delegate;
+    if ([del isKindOfClass:[UIView class]]) {
+        return ((UIView *)del).window;
+    }
+    return nil;
+}
+
 #pragma mark -
 
 @interface IVPlayerWatcher () {
@@ -141,7 +176,7 @@ static void IVCollectChrome(UIView *root, UIView *skip, CGFloat maxDim,
         if (l == nil) continue;
         if (l.player == nil) continue;
 
-        UIWindow *win = l.window;
+        UIWindow *win = IVWindowForLayer(l);
         if (win == nil) continue;
 
         CGSize lb = l.bounds.size;
