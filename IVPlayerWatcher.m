@@ -1,10 +1,14 @@
 #import "IVPlayerWatcher.h"
 #import "IVGlassOverlay.h"
+#import "IVGlassKit.h"
 #import <math.h>
 
 /// 是否尝试压掉系统自带的播放控件（播放/进度条）。
 /// 如果在你机器上误伤了画面，把这里改成 NO 重新打包即可。
 static const BOOL kHideNativeChrome = YES;
+
+/// 是否给顶部时间胶囊套玻璃。
+static const BOOL kGlassTopCapsule = YES;
 
 #pragma mark - 原生控件指纹
 
@@ -209,6 +213,10 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 
     [self mountOverlayForLayer:best inWindow:bestWindow];
 
+    if (kGlassTopCapsule) {
+        IVGlassTopCapsules(bestWindow, bestWindow, 0);
+    }
+
     if (kHideNativeChrome) {
         [self suppressNativeChromeForLayer:best inWindow:bestWindow];
     }
@@ -249,6 +257,52 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     [_overlay removeFromSuperview];
     _overlay = nil;
     _hostWindow = nil;
+}
+
+#pragma mark - 顶部胶囊玻璃化
+
+/// 判断一个 view 是不是「顶部时间胶囊」：
+/// 位于窗口上半部、高度在 24~48pt 之间、宽度明显大于高度（胶囊横长条）、
+/// 含一个 UILabel 子视图（时间文字）、且带圆角。
+static BOOL IVLooksLikeTopCapsule(UIView *v, UIWindow *win) {
+    if (v == nil || win == nil) return NO;
+    if (v.hidden || v.alpha < 0.5) return NO;
+
+    CGRect f = [v convertRect:v.bounds toView:win];
+    CGFloat W = win.bounds.size.width;
+    CGFloat H = win.bounds.size.height;
+    if (CGRectIsEmpty(f)) return NO;
+
+    // 顶部区域：y 在 safe 区顶部 ~ 屏高 18% 之间
+    CGFloat top = win.safeAreaInsets.top;
+    if (f.origin.y < top - 4.0) return NO;
+    if (f.origin.y > H * 0.20) return NO;
+
+    CGFloat w = f.size.width, h = f.size.height;
+    if (h < 22.0 || h > 52.0) return NO;
+    if (w < h * 2.2) return NO;         // 胶囊：宽远大于高
+    if (w > W * 0.85) return NO;
+
+    // 有圆角（胶囊特征）
+    if (v.layer.cornerRadius < h * 0.3) return NO;
+
+    // 含 UILabel（时间文字）
+    for (UIView *s in v.subviews) {
+        if ([s isKindOfClass:[UILabel class]]) return YES;
+    }
+    return NO;
+}
+
+static void IVGlassTopCapsules(UIView *root, UIWindow *win, int depth) {
+    if (root == nil || depth > 10) return;
+    for (UIView *v in root.subviews) {
+        if (v == nil || v.hidden) continue;
+        if (IVLooksLikeTopCapsule(v, win)) {
+            IVGlassStyleExistingView(v, v.bounds.size.height / 2.0);
+            continue;   // 命中后不再往里钻
+        }
+        IVGlassTopCapsules(v, win, depth + 1);
+    }
 }
 
 #pragma mark - 压掉原生控件
