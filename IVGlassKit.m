@@ -105,6 +105,49 @@ UIImage * _Nullable IVSymbol(NSString *name, CGFloat pointSize, CGFloat weightVa
     return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
 
+#pragma mark - 落盘日志
+
+void IVLog(NSString *format, ...) {
+    if (format.length == 0) return;
+
+    va_list ap;
+    va_start(ap, format);
+    NSString *msg = [[NSString alloc] initWithFormat:format arguments:ap];
+    va_end(ap);
+
+    NSDateFormatter *df = [[NSDateFormatter alloc] init];
+    df.dateFormat = @"HH:mm:ss.SSS";
+    NSString *line = [NSString stringWithFormat:@"[%@] %@\n",
+                      [df stringFromDate:[NSDate date]], msg];
+
+    static NSString *const kLogPath = @"/var/mobile/Media/IVGlassPlayer.log";
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    if (![fm fileExistsAtPath:kLogPath]) {
+        [line writeToFile:kLogPath atomically:YES
+                 encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+
+    // 超过 256KB 直接重开，避免无限增长
+    NSDictionary *attrs = [fm attributesOfItemAtPath:kLogPath error:nil];
+    if ([[attrs objectForKey:NSFileSize] unsignedLongLongValue] > 256 * 1024) {
+        [line writeToFile:kLogPath atomically:YES
+                 encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:kLogPath];
+    if (fh == nil) return;
+    @try {
+        [fh seekToEndOfFile];
+        [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
+    } @catch (__unused NSException *ex) {
+        // 写日志失败不影响主流程
+    }
+}
+
 #pragma mark - 给现有视图套玻璃
 
 void IVGlassStyleExistingView(UIView *view, CGFloat cornerRadius) {
