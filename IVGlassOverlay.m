@@ -47,6 +47,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     BOOL         _stateValid;      // 播放/静音图标的缓存校验位
     BOOL         _lastPlaying;
     BOOL         _lastMuted;
+    BOOL         _endHandled;      // 已经处理过「播到结尾」，避免每次 tick 重复触发
     NSTimer     *_tickTimer;
     NSTimer     *_collapseTimer;
 
@@ -416,8 +417,8 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     CGFloat pillW = MIN(W - kPillSide * 2.0, kPillMaxWidth);
     CGFloat pillX = (W - pillW) / 2.0;
     // 抬到相册底部那排缩略图条（可滑动选择的那排）上方，不压原生操作栏。
-    // 140 是「再往上让一格」的量，实际看着离缩略图条有点远，往回收 14pt 更贴。
-    CGFloat gap   = _expanded ? 146.0 : 126.0;
+    // 126 还是偏高，按截图红框位置再往下 22pt。
+    CGFloat gap   = _expanded ? 124.0 : 104.0;
     CGFloat pillY = H - safeBottom - pillH - gap;
 
     CGFloat minY = (self.safeAreaInsets.top > 0.0 ? self.safeAreaInsets.top : 0.0) + 8.0;
@@ -851,7 +852,36 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
                                duration:dur];
     }
 
+    [self handleEndStateWithCurrent:cur duration:dur];
     [self refreshIconsIfNeeded];
+}
+
+/// 播到结尾时把控制层「叫回来」。
+/// 相册在播完后会把自己的控制栏收掉、画面尺寸也可能变，导致中间的
+/// 播放/快退/快进要么被藏起来、要么被排到屏幕外，用户就没法点重播了。
+/// 这里一次性恢复显隐 + 按整窗重排，保证结尾一定能看到那三个按钮。
+- (void)handleEndStateWithCurrent:(double)cur duration:(double)dur {
+    BOOL atEnd = (dur > 0.5 && cur >= dur - 0.20);
+
+    if (atEnd) {
+        if (_endHandled) return;
+        _endHandled = YES;
+
+        _hasVideoRect = NO;
+        _videoRect = self.bounds;
+        [self setNeedsLayout];
+        [self layoutIfNeeded];
+
+        if (!_chromeVisible) {
+            [self setChromeVisible:YES animated:YES];
+        }
+        IVLog(@"playback end: chrome restored (replay available)");
+        return;
+    }
+
+    if (dur > 0.5 && cur < dur - 1.0) {
+        _endHandled = NO;   // 重新开始播放，允许下次再触发
+    }
 }
 
 /// 0.08s 一次地重设图标是白费 GPU 合成，状态不变就跳过
