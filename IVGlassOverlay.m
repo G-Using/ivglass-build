@@ -442,7 +442,7 @@ static const CGFloat kTickInterval  = 0.08;
     [p seekToTime:CMTimeMakeWithSeconds(target, 600)
         toleranceBefore:CMTimeMakeWithSeconds(0.06, 600)
          toleranceAfter:CMTimeMakeWithSeconds(0.06, 600)
-      completionHandler:nil];
+      completionHandler:^(BOOL finished) { (void)finished; }];
 
     if (dur > 0.0) _currentValue = target / dur;
     [self applyProgressValue];
@@ -573,7 +573,7 @@ static const CGFloat kTickInterval  = 0.08;
             [self.player seekToTime:CMTimeMakeWithSeconds(target, 600)
                     toleranceBefore:CMTimeMakeWithSeconds(0.4, 600)
                      toleranceAfter:CMTimeMakeWithSeconds(0.4, 600)
-                  completionHandler:nil];
+                  completionHandler:^(BOOL finished) { (void)finished; }];
         }
     } else if (g.state == UIGestureRecognizerStateEnded ||
                g.state == UIGestureRecognizerStateCancelled) {
@@ -584,7 +584,7 @@ static const CGFloat kTickInterval  = 0.08;
                 [self.player seekToTime:CMTimeMakeWithSeconds(target, 600)
                         toleranceBefore:CMTimeMakeWithSeconds(0.03, 600)
                          toleranceAfter:CMTimeMakeWithSeconds(0.03, 600)
-                      completionHandler:nil];
+                      completionHandler:^(BOOL finished) { (void)finished; }];
             }
             _dragging = NO;
         }
