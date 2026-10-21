@@ -6,8 +6,16 @@
 	<dict>
 		<key>Bundles</key>
 		<array>
+			<!-- 照片 -->
 			<string>com.apple.mobileslideshow</string>
+			<!-- 文件 -->
 			<string>com.apple.DocumentsApp</string>
+			<!-- 文件 / 邮件里的 QuickLook 预览：视频播放器实际跑在这个扩展进程里 -->
+			<string>com.apple.quicklook.extension.previewUI</string>
+			<!-- 老系统的 QuickLook UI 服务，留着兜底 -->
+			<string>com.apple.QuickLookUIService</string>
+			<!-- 文件的选择器（部分路径下预览由它承载） -->
+			<string>com.apple.DocumentManagerUICore</string>
 		</array>
 	</dict>
 </dict>

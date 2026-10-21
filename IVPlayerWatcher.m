@@ -180,10 +180,18 @@ static void IVCollectChrome(UIView *root, UIView *skip, CGFloat maxDim,
 static NSArray<UIWindow *> *IVAllWindows(void) {
     NSMutableArray<UIWindow *> *arr = [NSMutableArray array];
     UIApplication *app = [UIApplication sharedApplication];
+    if (app == nil) return arr;
+
     for (UIScene *sc in app.connectedScenes) {
         if (![sc isKindOfClass:[UIWindowScene class]]) continue;
         UIWindowScene *ws = (UIWindowScene *)sc;
         [arr addObjectsFromArray:ws.windows];
+    }
+
+    // 扩展进程（QuickLook 预览等）里 connectedScenes 有时是空的，
+    // 这时候退回老的 app.windows —— 不带 scene 的窗口只会出现在这里。
+    if (arr.count == 0) {
+        [arr addObjectsFromArray:app.windows];
     }
     return arr;
 }

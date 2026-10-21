@@ -44,13 +44,37 @@
 }
 %end
 
+/// 目标进程判定。
+/// 「文件」App 里点开视频，播放器并不在 com.apple.DocumentsApp 里跑 ——
+/// 文件用的是 QuickLook 预览，视频由 com.apple.quicklook.extension.previewUI
+/// 这个扩展进程呈现。所以只注入 DocumentsApp 是永远看不到控件的。
+static BOOL IVIsTargetProcess(void) {
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if (bid.length == 0) return NO;
+
+    static NSArray<NSString *> *exact = nil;
+    static dispatch_once_t onceTok;
+    dispatch_once(&onceTok, ^{
+        exact = @[
+            @"com.apple.mobileslideshow",                  // 照片
+            @"com.apple.DocumentsApp",                     // 文件
+            @"com.apple.quicklook.extension.previewUI",    // QuickLook 预览扩展（视频播放器在这）
+            @"com.apple.QuickLookUIService",               // 老系统的叫法
+            @"com.apple.DocumentManagerUICore",            // 文件选择器
+            @"com.apple.PreviewUI",                        // 部分系统版本的叫法
+        ];
+    });
+    if ([exact containsObject:bid]) return YES;
+
+    // 兜底：不同 iOS 版本对 QuickLook 扩展命名有出入，凡是名字里带
+    // quicklook 的一律放进来。注入多了不挂控件也不会有副作用。
+    if ([bid.lowercaseString containsString:@"quicklook"]) return YES;
+    return NO;
+}
+
 %ctor {
     // 进程白名单：视频壁纸会让 SpringBoard 里出现全屏 AVPlayerLayer，
-    // Filter.plist 拦不住的场景在这里兜底 —— 不是目标 App 就完全不启用 hook。
-    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
-    if (![bid isEqualToString:@"com.apple.mobileslideshow"] &&
-        ![bid isEqualToString:@"com.apple.DocumentsApp"]) {
-        return;
-    }
+    // Filter.plist 拦不住的场景在这里兜底 —— 不是目标进程就完全不启用 hook。
+    if (!IVIsTargetProcess()) return;
     %init(_ungrouped);
 }
