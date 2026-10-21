@@ -72,6 +72,9 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     _expanded = NO;
     _centersVisible = YES;   // 中央按钮常驻，播放中始终可见
     _chromeVisible = YES;    // 整体默认可见
+    _lastTapTime = 0.0;
+
+    IVLog(@"=== IVGlassPlayer 0.6.1 overlay init ===");
 
     return self;
 }
@@ -158,17 +161,18 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 }
 
 - (void)onWindowTap:(UITapGestureRecognizer *)g {
-    IVLog(@"onWindowTap state=%ld", (long)g.state);
-    if (g.state != UIGestureRecognizerStateEnded) return;
-    CGPoint p = [g locationInView:self];
-    [self handleExternalTapAt:p inView:self];
+    // 只记日志，不执行切换 —— 唯一生效的切换入口是 sendEvent 观察通道。
+    // 两条通道都 toggle 会互相抵消，表现就是「点一下消失又自己出现」。
+    IVLog(@"onWindowTap state=%ld (passive)", (long)g.state);
 }
 
 /// 兜底入口：window tap 和 sendEvent 观察都会调到这里，靠时间戳去重。
 - (void)handleExternalTapAt:(CGPoint)point inView:(UIView *)view {
     NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
-    if (now - _lastTapTime < 0.18) {
-        IVLog(@"tap deduped");
+    // 去重窗口要足够宽：window 手势和 sendEvent 观察是两条独立通道，
+    // 间隔可能拉到 300ms 以上，窗口太窄就会切成「消失又出现」。
+    if (now - _lastTapTime < 0.45) {
+        IVLog(@"tap deduped (dt=%.3f)", now - _lastTapTime);
         return;
     }
     _lastTapTime = now;
