@@ -20,6 +20,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+/// 给「别人家的视图」（如相册顶部时间胶囊）原地套一层玻璃质感：
+/// 保留原 view 与其内容，只在其下层插一块毛玻璃 + 描边 + 高光，并把它改成圆角。
+/// 只调 layer / 插 subview，不替换对象，避免破坏宿主内部引用。
+void IVGlassStyleExistingView(UIView * _Nonnull view, CGFloat cornerRadius);
+
 #ifdef __cplusplus
 extern "C" {
 #endif
