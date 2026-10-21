@@ -41,8 +41,12 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     // 状态
     double       _currentValue;    // 0..1
     BOOL         _dragging;
-    BOOL         _centersVisible;  // 中央按钮（在总开关之下）
-    BOOL         _chromeVisible;   // 总开关：胶囊 + 中央按钮
+    BOOL         _chromeVisible;   // 唯一开关：胶囊 + 中央按钮永远同进同出
+    CGRect       _videoRect;       // 画面区域（overlay 坐标系）
+    BOOL         _hasVideoRect;
+    BOOL         _stateValid;      // 播放/静音图标的缓存校验位
+    BOOL         _lastPlaying;
+    BOOL         _lastMuted;
     NSTimer     *_tickTimer;
     NSTimer     *_collapseTimer;
 
@@ -70,11 +74,12 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 
     _currentValue = 0.0;
     _expanded = NO;
-    _centersVisible = YES;   // 中央按钮常驻，播放中始终可见
     _chromeVisible = YES;    // 整体默认可见
+    _hasVideoRect = NO;
+    _videoRect = CGRectZero;
     _lastTapTime = 0.0;
 
-    IVLog(@"=== IVGlassPlayer 0.6.2 overlay init ===");
+    IVLog(@"=== IVGlassPlayer 0.6.3 overlay init ===");
 
     return self;
 }
@@ -196,9 +201,18 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
 - (void)setChromeVisible:(BOOL)visible animated:(BOOL)animated {
     IVLog(@"setChromeVisible:%d (current=%d)", visible, _chromeVisible);
-    if (_chromeVisible == visible) return;
     _chromeVisible = visible;
 
+    // 要收起时先把展开态复位：否则下次显出来还挂在拉长的时间轴上，
+    // 位置和形态都跟用户上次看到的对不上 —— 这就是「错位」的观感来源。
+    if (!visible && _expanded) {
+        [self setExpanded:NO animated:NO];
+    }
+
+    _centerWrap.userInteractionEnabled = visible;
+
+    // 注意：这里不做 early-return。胶囊和中央按钮必须每次都按同一个值落 alpha，
+    // 中途被别的动画打断过一次就可能一个到 0、一个停在 0.3，之后再也对不齐。
     __weak typeof(self) ws = self;
     [UIView animateWithDuration:animated ? 0.18 : 0.0
                           delay:0.0
@@ -207,10 +221,49 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
         __strong typeof(ws) s = ws;
         if (!s) return;
         s->_pill.alpha = visible ? 1.0 : 0.0;
-        s->_centerWrap.alpha = (visible && s->_centersVisible) ? 1.0 : 0.0;
+        s->_centerWrap.alpha = visible ? 1.0 : 0.0;
         s->_centerWrap.transform = visible ? CGAffineTransformIdentity
                                            : CGAffineTransformMakeScale(0.92, 0.92);
     } completion:nil];
+}
+
+#pragma mark - 画面区域同步
+
+/// 由 watcher 每次扫描时喂进来：视频 layer 在窗口里的矩形。
+/// 控件按这块区域居中/靠底，而不是死按整窗算。
+- (void)syncToVideoRect:(CGRect)rect {
+    CGRect win = self.bounds;
+    if (CGRectIsEmpty(win)) return;
+
+    CGRect local = CGRectZero;
+    BOOL ok = NO;
+
+    if (!CGRectIsEmpty(rect) && !CGRectIsNull(rect)) {
+        local = (self.window != nil) ? [self convertRect:rect fromView:self.window] : rect;
+        CGRect clip = CGRectIntersection(local, win);
+        if (!CGRectIsNull(clip) && !CGRectIsEmpty(clip)) {
+            CGFloat cov = (clip.size.width * clip.size.height) /
+                          MAX(1.0, win.size.width * win.size.height);
+            // 只有「基本铺满屏幕」的画面区域才值得照着排版；
+            // 小窗视频退回整窗，避免控件缩到画面里挤成一团
+            if (cov >= 0.55) {
+                local = clip;
+                ok = YES;
+            }
+        }
+    }
+
+    if (_hasVideoRect == ok && CGRectEqualToRect(_videoRect, local)) return;
+
+    _hasVideoRect = ok;
+    _videoRect = ok ? local : win;
+    [self setNeedsLayout];
+}
+
+/// 当前排版参照的区域
+- (CGRect)contentArea {
+    if (_hasVideoRect && !CGRectIsEmpty(_videoRect)) return _videoRect;
+    return self.bounds;
 }
 
 #pragma mark - 构建：底部胶囊
@@ -343,12 +396,16 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     CGFloat H = self.bounds.size.height;
     if (W < 1.0 || H < 1.0) return;
 
+    CGRect area = [self contentArea];
+
     CGFloat safeBottom = 34.0;
     UIWindow *win = self.window;
     if (win) safeBottom = win.safeAreaInsets.bottom;
 
+    // 胶囊永远贴着屏幕底部（它要对齐相册自己的操作栏），
+    // 只有中央按钮组跟着画面区域居中 —— 画面有黑边时按钮才不会偏到黑边里去
     [self layoutPillWithWidth:W height:H safeBottom:safeBottom];
-    [self layoutCenterWithWidth:W height:H];
+    [self layoutCenterWithWidth:W area:area];
     [self applyProgressValue];
 }
 
@@ -359,6 +416,9 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     // 抬到相册底部工具栏上方（截图中红框的位置），不压原生操作栏
     CGFloat gap   = _expanded ? 116.0 : 96.0;
     CGFloat pillY = H - safeBottom - pillH - gap;
+
+    CGFloat minY = (self.safeAreaInsets.top > 0.0 ? self.safeAreaInsets.top : 0.0) + 8.0;
+    if (pillY < minY) pillY = minY;
 
     _pill.frame = CGRectMake(pillX, pillY, pillW, pillH);
     [_pill updateCornerRadius:pillH / 2.0];
@@ -416,12 +476,12 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     [self applyProgressValue];
 }
 
-- (void)layoutCenterWithWidth:(CGFloat)W height:(CGFloat)H {
+- (void)layoutCenterWithWidth:(CGFloat)W area:(CGRect)area {
     CGFloat sideD = 68.0;
     CGFloat midD  = 84.0;
     CGFloat gap   = 26.0;
 
-    CGFloat scale = MIN(1.0, MIN(W, H) / 400.0);
+    CGFloat scale = MIN(1.0, MIN(W, self.bounds.size.height) / 400.0);
     scale = MAX(0.62, scale);
 
     sideD *= scale;
@@ -430,7 +490,8 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
     CGFloat totalW = sideD * 2.0 + midD + gap * 2.0;
     CGFloat originX = (W - totalW) / 2.0;
-    CGFloat midY = H / 2.0;
+    // 居中到「画面」而不是「整窗」：视频被 letterbox 时按钮才会跟着画面走
+    CGFloat midY = CGRectIsEmpty(area) ? self.bounds.size.height / 2.0 : CGRectGetMidY(area);
 
     _centerWrap.frame = CGRectMake(originX - gap * 0.4,
                                    midY - midD / 2.0 - gap * 0.4,
@@ -581,29 +642,17 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
 #pragma mark - 中央按钮显隐（点画面切换）
 
+#pragma mark - 控制层显隐
+
+/// 点胶囊空白处 = 点画面：整组一起收 / 一起出。
+/// 以前这里是独立的 _centersVisible，点一下胶囊只藏中间按钮、胶囊自己留着，
+/// 之后再点画面又会两个一起出来 —— 两套状态互相踩，就成了「显示和隐藏不在一起」。
 - (void)toggleCenters {
     if (_expanded) {
-        // 展开态不隐藏中央按钮
+        // 展开态（正在拖时间轴）不隐藏，避免手指还在拖控件就没了
         return;
     }
-    if (!_chromeVisible) {
-        // 整体隐藏时，点胶囊先恢复整体
-        [self setChromeVisible:YES animated:YES];
-        return;
-    }
-    _centersVisible = !_centersVisible;
-
-    __weak typeof(self) ws = self;
-    [UIView animateWithDuration:0.12
-                          delay:0.0
-                        options:UIViewAnimationOptionBeginFromCurrentState
-                     animations:^{
-        __strong typeof(ws) s = ws;
-        if (!s) return;
-        s->_centerWrap.alpha = s->_centersVisible ? 1.0 : 0.0;
-        s->_centerWrap.transform = s->_centersVisible ? CGAffineTransformIdentity
-                                                       : CGAffineTransformMakeScale(0.92, 0.92);
-    } completion:nil];
+    [self setChromeVisible:!_chromeVisible animated:YES];
 }
 
 #pragma mark - 手势
@@ -774,6 +823,19 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
                                duration:dur];
     }
 
+    [self refreshIconsIfNeeded];
+}
+
+/// 0.08s 一次地重设图标是白费 GPU 合成，状态不变就跳过
+- (void)refreshIconsIfNeeded {
+    BOOL playing = [self isPlaying];
+    BOOL muted = [self isMuted];
+    if (_stateValid && playing == _lastPlaying && muted == _lastMuted) return;
+
+    _stateValid = YES;
+    _lastPlaying = playing;
+    _lastMuted = muted;
+
     [self updatePlayState];
     [self updateMuteState];
 }
@@ -804,7 +866,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.hidden || self.alpha < 0.05) return NO;
 
-    if (_chromeVisible && _centersVisible && !_centerWrap.hidden &&
+    if (_chromeVisible && !_centerWrap.hidden &&
         _centerWrap.alpha > 0.05 && CGRectContainsPoint(_centerWrap.frame, point)) {
         return YES;
     }

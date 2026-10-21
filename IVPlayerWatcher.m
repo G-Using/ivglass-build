@@ -34,6 +34,23 @@ static BOOL IVNameLooksLikeChrome(NSString *name) {
     return NO;
 }
 
+/// 图层是否真的“露在屏幕上”：自身与所有祖先都不能被隐藏 / 透明化。
+/// 相册翻页时会把整页做成一个不可见的快照，只看 bounds 是认不出来的。
+static BOOL IVLayerIsVisible(AVPlayerLayer *layer) {
+    if (layer == nil) return NO;
+    if (layer.hidden) return NO;
+    if (layer.opacity < 0.02) return NO;
+
+    CALayer *cur = layer.superlayer;
+    int guard = 0;
+    while (cur != nil && guard < 64) {
+        if (cur.hidden || cur.opacity < 0.02) return NO;
+        cur = cur.superlayer;
+        guard++;
+    }
+    return YES;
+}
+
 /// 递归收集「看起来像原生播放控件」的视图；命中后不再往子层钻。
 static void IVCollectChrome(UIView *root, UIView *skip, CGFloat maxDim,
                             NSMutableArray<UIView *> *out, int depth);
@@ -103,8 +120,19 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     NSHashTable<AVPlayerLayer *> *_layers;
     IVGlassOverlay               *_overlay;
     UIWindow                     *_hostWindow;
+    AVPlayerLayer                *_boundLayer;      // overlay 当前绑定的是哪个 layer（弱引用，别拖住它）
     NSTimer                      *_scanTimer;
+    // 被我们压掉 alpha 的原生控件：view -> 原始 alpha。
+    // 必须记下来，卸载 overlay 时还原 —— 否则切到照片后底部工具栏会一直是透明的。
+    NSMapTable<UIView *, NSNumber *> *_suppressed;
+    CGRect                        _syncedVideoRect;
 }
+
+- (void)scan;
+- (void)mountOverlayForLayer:(AVPlayerLayer *)layer
+                    inWindow:(UIWindow *)win
+                   videoRect:(CGRect)videoRect;
+- (void)restoreNativeChrome;
 @end
 
 @implementation IVPlayerWatcher
@@ -122,6 +150,8 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     self = [super init];
     if (!self) return nil;
     _layers = [NSHashTable weakObjectsHashTable];
+    _suppressed = [NSMapTable weakToStrongObjectsMapTable];
+    _syncedVideoRect = CGRectZero;
     return self;
 }
 
@@ -146,7 +176,9 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     if (_scanTimer) return;
 
     __weak typeof(self) ws = self;
-    _scanTimer = [NSTimer scheduledTimerWithTimeInterval:0.45
+    // 0.45s 太慢：滑走之后 overlay 还会在照片上赖将近半秒。
+    // 0.18s 足以做到肉眼「跟着翻页一起消失」，而开销只是一次很小的数组遍历。
+    _scanTimer = [NSTimer scheduledTimerWithTimeInterval:0.18
                                                  repeats:YES
                                                    block:^(NSTimer *t) {
         __strong typeof(ws) s = ws;
@@ -175,10 +207,12 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     AVPlayerLayer *best = nil;
     CGFloat bestArea = 0.0;
     UIWindow *bestWindow = nil;
+    CGRect bestRect = CGRectZero;
 
     for (AVPlayerLayer *l in snapshot) {
         if (l == nil) continue;
         if (l.player == nil) continue;
+        if (!IVLayerIsVisible(l)) continue;
 
         UIWindow *win = IVWindowForLayer(l);
         if (win == nil) continue;
@@ -189,20 +223,39 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
         CGSize screen = win.bounds.size;
         if (screen.width < 2.0 || screen.height < 2.0) continue;
 
-        // 换算到窗口坐标，判断占用面积
+        // 换算到窗口坐标，并且——关键——裁到窗口可视区域内再判断。
         CGRect r = [l convertRect:l.bounds toLayer:win.layer];
-        CGFloat area = fabs(r.size.width * r.size.height);
+        CGRect clip = CGRectIntersection(r, win.bounds);
+        if (CGRectIsNull(clip) || CGRectIsEmpty(clip)) continue;
+
+        CGFloat layerArea = fabs(r.size.width * r.size.height);
+        if (layerArea < 1.0) continue;
+
+        CGFloat clipArea = fabs(clip.size.width * clip.size.height);
         CGFloat screenArea = screen.width * screen.height;
 
-        BOOL wideEnough = (fabs(r.size.width) >= screen.width * 0.62);
-        BOOL bigEnough  = (area >= screenArea * 0.26);
+        // 1) 得是「一块像样的全屏画面」，侧边预览 / 缩略图不算
+        if (layerArea < screenArea * 0.18) continue;
 
-        if (!wideEnough || !bigEnough) continue;
+        // 2) 得基本完整地摆在屏幕上。相册左右翻页时整页被平移出去，
+        //    这一比值会立刻掉下来 —— 于是滑到照片的瞬间 overlay 就会卸载，
+        //    而不会像原来那样跟着照片一起留在屏幕上。
+        //    阈值取 0.72 而不是 0.95：画面若是 aspect-fill 会有轻微溢出，
+        //    卡太死会让某些视频根本不挂控件。
+        if (clipArea / layerArea < 0.72) continue;
 
-        if (area > bestArea) {
-            bestArea = area;
+        // 3) 横向要够宽（排除竖条形的画中画）
+        if (clip.size.width < screen.width * 0.50) continue;
+
+        // 4) 中心得大致落在屏幕中线上：翻页过半后整页已经偏了，这里直接否掉
+        CGFloat cx = CGRectGetMidX(clip);
+        if (fabs(cx - CGRectGetMidX(win.bounds)) > screen.width * 0.20) continue;
+
+        if (clipArea > bestArea) {
+            bestArea = clipArea;
             best = l;
             bestWindow = win;
+            bestRect = r;
         }
     }
 
@@ -211,7 +264,7 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
         return;
     }
 
-    [self mountOverlayForLayer:best inWindow:bestWindow];
+    [self mountOverlayForLayer:best inWindow:bestWindow videoRect:bestRect];
 
     if (kGlassTopCapsule) {
         IVGlassTopCapsules(bestWindow, bestWindow, 0);
@@ -271,11 +324,17 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 
 #pragma mark - 挂载 / 卸载
 
-- (void)mountOverlayForLayer:(AVPlayerLayer *)layer inWindow:(UIWindow *)win {
+- (void)mountOverlayForLayer:(AVPlayerLayer *)layer
+                    inWindow:(UIWindow *)win
+                   videoRect:(CGRect)videoRect {
     BOOL needRebuild = NO;
 
     if (_overlay != nil) {
         if (_hostWindow != win) {
+            needRebuild = YES;
+        } else if (_boundLayer != layer || _overlay.player != layer.player) {
+            // 换了一个播放器（上一个视频关掉、开了下一个），或者同一个 layer 换了 player：
+            // 必须当成新的一次挂载，控制层重新回到「可见」。
             needRebuild = YES;
         } else if (_overlay.superview != win) {
             // 只是从层级里掉了（相册重排视图时会发生）。
@@ -287,11 +346,14 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     }
 
     if (needRebuild) {
-        BOOL wasVisible = _overlay.chromeVisible;
+        // 同一个播放器重建才保留显隐状态；换了播放器就恢复可见
+        BOOL samePlayer = (_overlay != nil && _overlay.player == layer.player);
+        BOOL wasVisible = samePlayer ? _overlay.chromeVisible : YES;
         [self teardownOverlay];
 
         IVGlassOverlay *ov = [[IVGlassOverlay alloc] initWithFrame:win.bounds];
         ov.player = layer.player;
+        [ov syncToVideoRect:videoRect];
         [win addSubview:ov];
         [ov bindWindow:win];
         [ov startTracking];
@@ -299,23 +361,27 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 
         _overlay = ov;
         _hostWindow = win;
+        _boundLayer = layer;
 
-        IVLog(@"overlay rebuilt: win=%@ visible=%d",
-              NSStringFromClass([win class]), wasVisible);
+        IVLog(@"overlay rebuilt: win=%@ visible=%d samePlayer=%d",
+              NSStringFromClass([win class]), wasVisible, samePlayer);
     } else if (_overlay == nil) {
         IVGlassOverlay *ov = [[IVGlassOverlay alloc] initWithFrame:win.bounds];
         ov.player = layer.player;
+        [ov syncToVideoRect:videoRect];
         [win addSubview:ov];
         [ov bindWindow:win];
         [ov startTracking];
 
         _overlay = ov;
         _hostWindow = win;
+        _boundLayer = layer;
 
         IVLog(@"overlay mounted: win=%@ bounds=%@", NSStringFromClass([win class]),
               NSStringFromCGRect(win.bounds));
     } else {
         _overlay.player = layer.player;
+        _boundLayer = layer;
         [_overlay bindWindow:win];
     }
 
@@ -324,18 +390,32 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
         [_overlay relayout];
     }
 
+    // 画面区域跟着视频走：控件按画面居中/靠底，而不是死按整窗算 —— 这是「错位」的另一半原因
+    if (!CGRectEqualToRect(_syncedVideoRect, videoRect)) {
+        _syncedVideoRect = videoRect;
+        [_overlay syncToVideoRect:videoRect];
+    }
+
     if ([win.subviews lastObject] != _overlay) {
         [win bringSubviewToFront:_overlay];
     }
 }
 
 - (void)teardownOverlay {
-    if (_overlay == nil) return;
+    [self restoreNativeChrome];
+
+    if (_overlay == nil) {
+        _boundLayer = nil;
+        _syncedVideoRect = CGRectZero;
+        return;
+    }
     [_overlay unbindWindow];
     [_overlay stopTracking];
     [_overlay removeFromSuperview];
     _overlay = nil;
     _hostWindow = nil;
+    _boundLayer = nil;
+    _syncedVideoRect = CGRectZero;
 }
 
 #pragma mark - 顶部胶囊玻璃化
@@ -399,10 +479,28 @@ static void IVGlassTopCapsules(UIView *root, UIWindow *win, int depth) {
     IVCollectChrome(win, videoView, maxDim, hits, 0);
 
     for (UIView *v in hits) {
+        // 记下原始 alpha，卸载时还原
+        if ([_suppressed objectForKey:v] == nil) {
+            [_suppressed setObject:@(v.alpha) forKey:v];
+        }
         if (v.alpha > 0.03) {
             v.alpha = 0.0;
         }
     }
+}
+
+/// 把被压掉的原生控件恢复原样。
+/// 少了这一步，从视频滑到照片后，相册底部那排操作栏会永久透明。
+- (void)restoreNativeChrome {
+    if (_suppressed.count == 0) return;
+
+    for (UIView *v in _suppressed) {
+        NSNumber *orig = [_suppressed objectForKey:v];
+        if (v != nil && orig != nil) {
+            v.alpha = orig.doubleValue;
+        }
+    }
+    [_suppressed removeAllObjects];
 }
 
 @end
