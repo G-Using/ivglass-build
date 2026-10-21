@@ -233,12 +233,14 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
         IVGlassOverlay *ov = [[IVGlassOverlay alloc] initWithFrame:win.bounds];
         ov.player = layer.player;
         [win addSubview:ov];
+        [ov bindWindow:win];
         [ov startTracking];
 
         _overlay = ov;
         _hostWindow = win;
     } else {
         _overlay.player = layer.player;
+        [_overlay bindWindow:win];
     }
 
     if (!CGRectEqualToRect(_overlay.frame, win.bounds)) {
@@ -253,6 +255,7 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 
 - (void)teardownOverlay {
     if (_overlay == nil) return;
+    [_overlay unbindWindow];
     [_overlay stopTracking];
     [_overlay removeFromSuperview];
     _overlay = nil;
