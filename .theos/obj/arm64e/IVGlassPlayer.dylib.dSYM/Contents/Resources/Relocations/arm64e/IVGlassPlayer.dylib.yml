@@ -1,0 +1,136 @@
+---
+triple:          'arm64e-apple-darwin'
+binary-path:     '/Users/macmini/WorkBuddy/2026-10-21-20-22-48/ivglass-build/.theos/obj/arm64e/IVGlassPlayer.dylib'
+relocations:
+  - { offset: 0x1E, size: 0x8, addend: 0x0, symName: __ZL24_logosLocalCtor_0271b2a0iPPcS0_, symObjAddr: 0x0, symBinAddr: 0x4000, symSize: 0x1A0 }
+  - { offset: 0xD0, size: 0x8, addend: 0x0, symName: '__ZL47_logos_orig$_ungrouped$AVPlayerLayer$setPlayer$', symObjAddr: 0x7910, symBinAddr: 0x194C8, symSize: 0x0 }
+  - { offset: 0x829, size: 0x8, addend: 0x0, symName: '__ZL42_logos_orig$_ungrouped$UIWindow$sendEvent$', symObjAddr: 0x7918, symBinAddr: 0x194D0, symSize: 0x0 }
+  - { offset: 0x1E12, size: 0x8, addend: 0x0, symName: __ZL24_logosLocalCtor_0271b2a0iPPcS0_, symObjAddr: 0x0, symBinAddr: 0x4000, symSize: 0x1A0 }
+  - { offset: 0x1F0A, size: 0x8, addend: 0x0, symName: __ZL24_logosLocalCtor_0271b2a0iPPcS0_.cold.1, symObjAddr: 0x410, symBinAddr: 0xBF6C, symSize: 0x14 }
+  - { offset: 0x1F25, size: 0x8, addend: 0x0, symName: __ZL24_logosLocalCtor_0271b2a0iPPcS0_.cold.1, symObjAddr: 0x410, symBinAddr: 0xBF6C, symSize: 0x14 }
+  - { offset: 0x1F39, size: 0x8, addend: 0x0, symName: __ZL24_logosLocalCtor_0271b2a0iPPcS0_.cold.1, symObjAddr: 0x410, symBinAddr: 0xBF6C, symSize: 0x14 }
+  - { offset: 0x1F4B, size: 0x8, addend: 0x0, symName: '__ZL49_logos_method$_ungrouped$AVPlayerLayer$setPlayer$P13AVPlayerLayerP13objc_selectorP8AVPlayer', symObjAddr: 0x1A0, symBinAddr: 0x41A0, symSize: 0xC0 }
+  - { offset: 0x2006, size: 0x8, addend: 0x0, symName: '__ZL44_logos_method$_ungrouped$UIWindow$sendEvent$P8UIWindowP13objc_selectorP7UIEvent', symObjAddr: 0x260, symBinAddr: 0x4260, symSize: 0xC0 }
+  - { offset: 0x206B, size: 0x8, addend: 0x0, symName: ____ZL17IVIsTargetProcessv_block_invoke, symObjAddr: 0x320, symBinAddr: 0x4320, symSize: 0x18 }
+  - { offset: 0x2090, size: 0x8, addend: 0x0, symName: '____ZL49_logos_method$_ungrouped$AVPlayerLayer$setPlayer$P13AVPlayerLayerP13objc_selectorP8AVPlayer_block_invoke', symObjAddr: 0x338, symBinAddr: 0x4338, symSize: 0xC4 }
+  - { offset: 0x20CA, size: 0x8, addend: 0x0, symName: ___copy_helper_block_ea8_32w, symObjAddr: 0x3FC, symBinAddr: 0x43FC, symSize: 0xC }
+  - { offset: 0x20F0, size: 0x8, addend: 0x0, symName: ___destroy_helper_block_ea8_32w, symObjAddr: 0x408, symBinAddr: 0x4408, symSize: 0x8 }
+  - { offset: 0x2254, size: 0x8, addend: 0x0, symName: '-[IVGlassView initWithRadius:]', symObjAddr: 0x0, symBinAddr: 0x4410, symSize: 0x3E0 }
+  - { offset: 0x2261, size: 0x8, addend: 0x0, symName: _IVLog, symObjAddr: 0x878, symBinAddr: 0x4C88, symSize: 0x254 }
+  - { offset: 0x2376, size: 0x8, addend: 0x0, symName: _IVGlassStyleExistingView, symObjAddr: 0xACC, symBinAddr: 0x4EDC, symSize: 0x394 }
+  - { offset: 0x2397, size: 0x8, addend: 0x0, symName: _IVGlassStyleExistingView.kIVGlassAppliedKey, symObjAddr: 0x1390, symBinAddr: 0x19400, symSize: 0x0 }
+  - { offset: 0x2FDC, size: 0x8, addend: 0x0, symName: '-[IVGlassView initWithRadius:]', symObjAddr: 0x0, symBinAddr: 0x4410, symSize: 0x3E0 }
+  - { offset: 0x302E, size: 0x8, addend: 0x0, symName: '-[IVGlassView updateCornerRadius:]', symObjAddr: 0x3E0, symBinAddr: 0x47F0, symSize: 0x54 }
+  - { offset: 0x306D, size: 0x8, addend: 0x0, symName: '-[IVGlassView layoutSubviews]', symObjAddr: 0x434, symBinAddr: 0x4844, symSize: 0x138 }
+  - { offset: 0x30BA, size: 0x8, addend: 0x0, symName: '-[IVGlassView .cxx_destruct]', symObjAddr: 0x56C, symBinAddr: 0x497C, symSize: 0x54 }
+  - { offset: 0x30EA, size: 0x8, addend: 0x0, symName: _IVTimeString, symObjAddr: 0x5C0, symBinAddr: 0x49D0, symSize: 0x198 }
+  - { offset: 0x317B, size: 0x8, addend: 0x0, symName: _IVHaptic, symObjAddr: 0x758, symBinAddr: 0x4B68, symSize: 0x54 }
+  - { offset: 0x31A0, size: 0x8, addend: 0x0, symName: _IVSymbol, symObjAddr: 0x7AC, symBinAddr: 0x4BBC, symSize: 0xCC }
+  - { offset: 0x4038, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay initWithFrame:]', symObjAddr: 0x0, symBinAddr: 0x5270, symSize: 0x118 }
+  - { offset: 0x40AC, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay layoutPillWithWidth:height:safeBottom:]', symObjAddr: 0x19AC, symBinAddr: 0x6C1C, symSize: 0x47C }
+  - { offset: 0x7EC7, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay initWithFrame:]', symObjAddr: 0x0, symBinAddr: 0x5270, symSize: 0x118 }
+  - { offset: 0x7F21, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay dealloc]', symObjAddr: 0x118, symBinAddr: 0x5388, symSize: 0xA8 }
+  - { offset: 0x7F51, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay bindWindow:]', symObjAddr: 0x1C0, symBinAddr: 0x5430, symSize: 0x144 }
+  - { offset: 0x7FCB, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay unbindWindow]', symObjAddr: 0x304, symBinAddr: 0x5574, symSize: 0x84 }
+  - { offset: 0x7FFB, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:]', symObjAddr: 0x388, symBinAddr: 0x55F8, symSize: 0x8 }
+  - { offset: 0x8041, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay gestureRecognizer:shouldReceiveTouch:]', symObjAddr: 0x390, symBinAddr: 0x5600, symSize: 0x204 }
+  - { offset: 0x8108, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay onWindowTap:]', symObjAddr: 0x594, symBinAddr: 0x5804, symSize: 0x70 }
+  - { offset: 0x8163, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay handleExternalTapAt:inView:]', symObjAddr: 0x604, symBinAddr: 0x5874, symSize: 0x1C0 }
+  - { offset: 0x8219, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay setChromeVisible:animated:]', symObjAddr: 0x7C4, symBinAddr: 0x5A34, symSize: 0x160 }
+  - { offset: 0x827E, size: 0x8, addend: 0x0, symName: '___44-[IVGlassOverlay setChromeVisible:animated:]_block_invoke', symObjAddr: 0x924, symBinAddr: 0x5B94, symSize: 0x8C }
+  - { offset: 0x82C0, size: 0x8, addend: 0x0, symName: ___copy_helper_block_e8_32w, symObjAddr: 0x9B0, symBinAddr: 0x5C20, symSize: 0xC }
+  - { offset: 0x82E6, size: 0x8, addend: 0x0, symName: ___destroy_helper_block_e8_32w, symObjAddr: 0x9BC, symBinAddr: 0x5C2C, symSize: 0x8 }
+  - { offset: 0x8303, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay syncToVideoRect:]', symObjAddr: 0x9C4, symBinAddr: 0x5C34, symSize: 0x2A4 }
+  - { offset: 0x847B, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay contentArea]', symObjAddr: 0xC68, symBinAddr: 0x5ED8, symSize: 0x64 }
+  - { offset: 0x84ED, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay buildPill]', symObjAddr: 0xCCC, symBinAddr: 0x5F3C, symSize: 0x76C }
+  - { offset: 0x85BC, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay buildCenter]', symObjAddr: 0x1438, symBinAddr: 0x66A8, symSize: 0x438 }
+  - { offset: 0x864A, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay relayout]', symObjAddr: 0x1870, symBinAddr: 0x6AE0, symSize: 0x38 }
+  - { offset: 0x867B, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay layoutSubviews]', symObjAddr: 0x18A8, symBinAddr: 0x6B18, symSize: 0x104 }
+  - { offset: 0x8717, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay layoutCenterWithWidth:area:]', symObjAddr: 0x1E28, symBinAddr: 0x7098, symSize: 0x344 }
+  - { offset: 0x88EF, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay applyProgressValue]', symObjAddr: 0x216C, symBinAddr: 0x73DC, symSize: 0x140 }
+  - { offset: 0x89EF, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay isPlaying]', symObjAddr: 0x22AC, symBinAddr: 0x751C, symSize: 0x58 }
+  - { offset: 0x8A44, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay isMuted]', symObjAddr: 0x2304, symBinAddr: 0x7574, symSize: 0x50 }
+  - { offset: 0x8A89, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay mediaDuration]', symObjAddr: 0x2354, symBinAddr: 0x75C4, symSize: 0xDC }
+  - { offset: 0x8B96, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay isAtEnd]', symObjAddr: 0x2430, symBinAddr: 0x76A0, symSize: 0xE8 }
+  - { offset: 0x8C0F, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay updatePlayState]', symObjAddr: 0x2518, symBinAddr: 0x7788, symSize: 0x130 }
+  - { offset: 0x8D20, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay updateMuteState]', symObjAddr: 0x2648, symBinAddr: 0x78B8, symSize: 0x88 }
+  - { offset: 0x8D6E, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay onPlayPause]', symObjAddr: 0x26D0, symBinAddr: 0x7940, symSize: 0x128 }
+  - { offset: 0x8DC5, size: 0x8, addend: 0x0, symName: '___29-[IVGlassOverlay onPlayPause]_block_invoke', symObjAddr: 0x27F8, symBinAddr: 0x7A68, symSize: 0x8 }
+  - { offset: 0x8DF9, size: 0x8, addend: 0x0, symName: ___copy_helper_block_e8_32s, symObjAddr: 0x2800, symBinAddr: 0x7A70, symSize: 0x8 }
+  - { offset: 0x8E1E, size: 0x8, addend: 0x0, symName: ___destroy_helper_block_e8_32s, symObjAddr: 0x2808, symBinAddr: 0x7A78, symSize: 0x8 }
+  - { offset: 0x8E3B, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay onToggleMute]', symObjAddr: 0x2810, symBinAddr: 0x7A80, symSize: 0x68 }
+  - { offset: 0x8E89, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay onRewind]', symObjAddr: 0x2878, symBinAddr: 0x7AE8, symSize: 0x8 }
+  - { offset: 0x8EB9, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay onForward]', symObjAddr: 0x2880, symBinAddr: 0x7AF0, symSize: 0x8 }
+  - { offset: 0x8EE9, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay seekBy:]', symObjAddr: 0x2888, symBinAddr: 0x7AF8, symSize: 0x178 }
+  - { offset: 0x8FF3, size: 0x8, addend: 0x0, symName: '___25-[IVGlassOverlay seekBy:]_block_invoke', symObjAddr: 0x2A00, symBinAddr: 0x7C70, symSize: 0x4 }
+  - { offset: 0x9027, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay toggleCenters]', symObjAddr: 0x2A04, symBinAddr: 0x7C74, symSize: 0x30 }
+  - { offset: 0x9057, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay onPillTap:]', symObjAddr: 0x2A34, symBinAddr: 0x7CA4, symSize: 0xCC }
+  - { offset: 0x90C2, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay onPillPan:]', symObjAddr: 0x2B00, symBinAddr: 0x7D70, symSize: 0x2F0 }
+  - { offset: 0x9269, size: 0x8, addend: 0x0, symName: '___28-[IVGlassOverlay onPillPan:]_block_invoke', symObjAddr: 0x2DF0, symBinAddr: 0x8060, symSize: 0x4 }
+  - { offset: 0x929E, size: 0x8, addend: 0x0, symName: '___28-[IVGlassOverlay onPillPan:]_block_invoke_2', symObjAddr: 0x2DF4, symBinAddr: 0x8064, symSize: 0x4 }
+  - { offset: 0x92D2, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay updateFromPlayerTime]', symObjAddr: 0x2DF8, symBinAddr: 0x8068, symSize: 0xE4 }
+  - { offset: 0x9347, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay setExpanded:animated:]', symObjAddr: 0x2EDC, symBinAddr: 0x814C, symSize: 0x130 }
+  - { offset: 0x93A8, size: 0x8, addend: 0x0, symName: '___39-[IVGlassOverlay setExpanded:animated:]_block_invoke', symObjAddr: 0x300C, symBinAddr: 0x827C, symSize: 0xC8 }
+  - { offset: 0x93FE, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay scheduleCollapse]', symObjAddr: 0x30D4, symBinAddr: 0x8344, symSize: 0x88 }
+  - { offset: 0x942F, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay onCollapseTimer]', symObjAddr: 0x315C, symBinAddr: 0x83CC, symSize: 0x6C }
+  - { offset: 0x9460, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay startTracking]', symObjAddr: 0x31C8, symBinAddr: 0x8438, symSize: 0x100 }
+  - { offset: 0x94A1, size: 0x8, addend: 0x0, symName: '___31-[IVGlassOverlay startTracking]_block_invoke', symObjAddr: 0x32C8, symBinAddr: 0x8538, symSize: 0x6C }
+  - { offset: 0x94F7, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay stopTracking]', symObjAddr: 0x3334, symBinAddr: 0x85A4, symSize: 0x64 }
+  - { offset: 0x9528, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay tick]', symObjAddr: 0x3398, symBinAddr: 0x8608, symSize: 0x16C }
+  - { offset: 0x958D, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay holdBeforeNaturalEndWithCurrent:duration:]', symObjAddr: 0x3504, symBinAddr: 0x8774, symSize: 0x108 }
+  - { offset: 0x965E, size: 0x8, addend: 0x0, symName: '___59-[IVGlassOverlay holdBeforeNaturalEndWithCurrent:duration:]_block_invoke', symObjAddr: 0x360C, symBinAddr: 0x887C, symSize: 0x4 }
+  - { offset: 0x9692, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay handleEndStateWithCurrent:duration:]', symObjAddr: 0x3610, symBinAddr: 0x8880, symSize: 0xF4 }
+  - { offset: 0x96F3, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay refreshIconsIfNeeded]', symObjAddr: 0x3704, symBinAddr: 0x8974, symSize: 0xA8 }
+  - { offset: 0x96FD, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay refreshIconsIfNeeded]', symObjAddr: 0x3704, symBinAddr: 0x8974, symSize: 0xA8 }
+  - { offset: 0x9746, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay refreshTimeLabelsForRatio:]', symObjAddr: 0x37AC, symBinAddr: 0x8A1C, symSize: 0x50 }
+  - { offset: 0x9797, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay refreshTimeLabelsForRatio:current:duration:]', symObjAddr: 0x37FC, symBinAddr: 0x8A6C, symSize: 0x160 }
+  - { offset: 0x984E, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay interceptsPoint:inWindow:]', symObjAddr: 0x395C, symBinAddr: 0x8BCC, symSize: 0x11C }
+  - { offset: 0x98C9, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay pointInside:withEvent:]', symObjAddr: 0x3A78, symBinAddr: 0x8CE8, symSize: 0xF8 }
+  - { offset: 0x9931, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay player]', symObjAddr: 0x3B70, symBinAddr: 0x8DE0, symSize: 0x10 }
+  - { offset: 0x9965, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay setPlayer:]', symObjAddr: 0x3B80, symBinAddr: 0x8DF0, symSize: 0x14 }
+  - { offset: 0x99A4, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay isExpanded]', symObjAddr: 0x3B94, symBinAddr: 0x8E04, symSize: 0x10 }
+  - { offset: 0x99D9, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay chromeVisible]', symObjAddr: 0x3BA4, symBinAddr: 0x8E14, symSize: 0x10 }
+  - { offset: 0x9A0D, size: 0x8, addend: 0x0, symName: '-[IVGlassOverlay .cxx_destruct]', symObjAddr: 0x3BB4, symBinAddr: 0x8E24, symSize: 0x1BC }
+  - { offset: 0xA02B, size: 0x8, addend: 0x0, symName: '+[IVPlayerWatcher shared]', symObjAddr: 0x0, symBinAddr: 0x8FE0, symSize: 0x44 }
+  - { offset: 0xA038, size: 0x8, addend: 0x0, symName: '+[IVPlayerWatcher shared]', symObjAddr: 0x0, symBinAddr: 0x8FE0, symSize: 0x44 }
+  - { offset: 0xA064, size: 0x8, addend: 0x0, symName: _shared.inst, symObjAddr: 0x11B50, symBinAddr: 0x194E8, symSize: 0x0 }
+  - { offset: 0xA07B, size: 0x8, addend: 0x0, symName: _shared.once, symObjAddr: 0x11B58, symBinAddr: 0x194F0, symSize: 0x0 }
+  - { offset: 0xBF9B, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher observeTouchEvent:inWindow:]', symObjAddr: 0x186C, symBinAddr: 0xA828, symSize: 0x3A4 }
+  - { offset: 0xBFC3, size: 0x8, addend: 0x0, symName: '_observeTouchEvent:inWindow:.sTracked', symObjAddr: 0x11B60, symBinAddr: 0x194F8, symSize: 0x0 }
+  - { offset: 0xBFDA, size: 0x8, addend: 0x0, symName: '_observeTouchEvent:inWindow:.sStart.0', symObjAddr: 0x11B68, symBinAddr: 0x19500, symSize: 0x0 }
+  - { offset: 0xBFE5, size: 0x8, addend: 0x0, symName: '_observeTouchEvent:inWindow:.sStart.1', symObjAddr: 0x11B70, symBinAddr: 0x19508, symSize: 0x0 }
+  - { offset: 0xBFFE, size: 0x8, addend: 0x0, symName: '_observeTouchEvent:inWindow:.sStartTime', symObjAddr: 0x11B78, symBinAddr: 0x19510, symSize: 0x0 }
+  - { offset: 0xC015, size: 0x8, addend: 0x0, symName: '_observeTouchEvent:inWindow:.sOnOwnControl', symObjAddr: 0x11B80, symBinAddr: 0x19518, symSize: 0x0 }
+  - { offset: 0xC503, size: 0x8, addend: 0x0, symName: '+[IVPlayerWatcher shared].cold.1', symObjAddr: 0x2FB0, symBinAddr: 0xBF80, symSize: 0x14 }
+  - { offset: 0xC51E, size: 0x8, addend: 0x0, symName: '+[IVPlayerWatcher shared].cold.1', symObjAddr: 0x2FB0, symBinAddr: 0xBF80, symSize: 0x14 }
+  - { offset: 0xC531, size: 0x8, addend: 0x0, symName: '___25+[IVPlayerWatcher shared]_block_invoke', symObjAddr: 0x44, symBinAddr: 0x9024, symSize: 0x40 }
+  - { offset: 0xC559, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher init]', symObjAddr: 0x84, symBinAddr: 0x9064, symSize: 0xB8 }
+  - { offset: 0xC58E, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher noteLayer:]', symObjAddr: 0x13C, symBinAddr: 0x911C, symSize: 0x8C }
+  - { offset: 0xC5CF, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher forgetLayer:]', symObjAddr: 0x1C8, symBinAddr: 0x91A8, symSize: 0x84 }
+  - { offset: 0xC610, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher ensureScanning]', symObjAddr: 0x24C, symBinAddr: 0x922C, symSize: 0xF8 }
+  - { offset: 0xC651, size: 0x8, addend: 0x0, symName: '___33-[IVPlayerWatcher ensureScanning]_block_invoke', symObjAddr: 0x344, symBinAddr: 0x9324, symSize: 0x6C }
+  - { offset: 0xCA8D, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher scan]', symObjAddr: 0x3C4, symBinAddr: 0x9390, symSize: 0x100C }
+  - { offset: 0xCF7E, size: 0x8, addend: 0x0, symName: _IVSubtreeShowsStaticImage, symObjAddr: 0x2C24, symBinAddr: 0xBBE0, symSize: 0x344 }
+  - { offset: 0xD09C, size: 0x8, addend: 0x0, symName: _IVGlassTopCapsules, symObjAddr: 0x14A0, symBinAddr: 0xA45C, symSize: 0x3CC }
+  - { offset: 0xD196, size: 0x8, addend: 0x0, symName: '___23-[IVPlayerWatcher scan]_block_invoke', symObjAddr: 0x13D0, symBinAddr: 0xA39C, symSize: 0xC0 }
+  - { offset: 0xD2C0, size: 0x8, addend: 0x0, symName: '___46-[IVPlayerWatcher observeTouchEvent:inWindow:]_block_invoke', symObjAddr: 0x1C10, symBinAddr: 0xABCC, symSize: 0x10 }
+  - { offset: 0xD2E9, size: 0x8, addend: 0x0, symName: '___46-[IVPlayerWatcher observeTouchEvent:inWindow:]_block_invoke.17', symObjAddr: 0x1C20, symBinAddr: 0xABDC, symSize: 0x10 }
+  - { offset: 0xD311, size: 0x8, addend: 0x0, symName: ___copy_helper_block_e8_32s40s, symObjAddr: 0x1C30, symBinAddr: 0xABEC, symSize: 0x3C }
+  - { offset: 0xD337, size: 0x8, addend: 0x0, symName: ___destroy_helper_block_e8_32s40s, symObjAddr: 0x1C6C, symBinAddr: 0xAC28, symSize: 0x3C }
+  - { offset: 0xD354, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher scheduleReshowIfNeeded]', symObjAddr: 0x1CA8, symBinAddr: 0xAC64, symSize: 0x108 }
+  - { offset: 0xD395, size: 0x8, addend: 0x0, symName: '___41-[IVPlayerWatcher scheduleReshowIfNeeded]_block_invoke', symObjAddr: 0x1DB0, symBinAddr: 0xAD6C, symSize: 0x60 }
+  - { offset: 0xD3F7, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher mountOverlayForLayer:inWindow:videoRect:]', symObjAddr: 0x1E10, symBinAddr: 0xADCC, symSize: 0x500 }
+  - { offset: 0xD547, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher teardownOverlay]', symObjAddr: 0x2310, symBinAddr: 0xB2CC, symSize: 0x90 }
+  - { offset: 0xD578, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher suppressNativeChromeForLayer:inWindow:]', symObjAddr: 0x23A0, symBinAddr: 0xB35C, symSize: 0x260 }
+  - { offset: 0xD67B, size: 0x8, addend: 0x0, symName: _IVCollectChrome, symObjAddr: 0x2600, symBinAddr: 0xB5BC, symSize: 0x454 }
+  - { offset: 0xD7F0, size: 0x8, addend: 0x0, symName: _IVCollectChrome.cold.1, symObjAddr: 0x2FC4, symBinAddr: 0xBF94, symSize: 0x28 }
+  - { offset: 0xD833, size: 0x8, addend: 0x0, symName: _IVCollectChrome.cold.2, symObjAddr: 0x2FEC, symBinAddr: 0xBFBC, symSize: 0x28 }
+  - { offset: 0xD876, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher restoreNativeChrome]', symObjAddr: 0x2A54, symBinAddr: 0xBA10, symSize: 0x148 }
+  - { offset: 0xD8DC, size: 0x8, addend: 0x0, symName: '-[IVPlayerWatcher .cxx_destruct]', symObjAddr: 0x2B9C, symBinAddr: 0xBB58, symSize: 0x88 }
+  - { offset: 0xD934, size: 0x8, addend: 0x0, symName: _IVSubtreeShowsStaticImage.cold.1, symObjAddr: 0x3014, symBinAddr: 0xBFE4, symSize: 0x14 }
+  - { offset: 0xD950, size: 0x8, addend: 0x0, symName: _IVSubtreeShowsStaticImage.cold.1, symObjAddr: 0x3014, symBinAddr: 0xBFE4, symSize: 0x14 }
+  - { offset: 0xD965, size: 0x8, addend: 0x0, symName: _IVSubtreeShowsStaticImage.cold.1, symObjAddr: 0x3014, symBinAddr: 0xBFE4, symSize: 0x14 }
+  - { offset: 0xD977, size: 0x8, addend: 0x0, symName: ___IVNameLooksLikePlayerChrome_block_invoke, symObjAddr: 0x2F68, symBinAddr: 0xBF24, symSize: 0x18 }
+  - { offset: 0xD99C, size: 0x8, addend: 0x0, symName: ___IVNameLooksLikeChrome_block_invoke, symObjAddr: 0x2F80, symBinAddr: 0xBF3C, symSize: 0x18 }
+  - { offset: 0xD9C1, size: 0x8, addend: 0x0, symName: ___IVNameLooksLikeChrome_block_invoke_2, symObjAddr: 0x2F98, symBinAddr: 0xBF54, symSize: 0x18 }
+...

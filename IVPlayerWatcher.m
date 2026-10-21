@@ -65,13 +65,43 @@ static BOOL IVLayerIsVisible(AVPlayerLayer *layer) {
 
 #pragma mark - 遮挡检测（几何判断抓不到的那一半）
 
+/// 是不是「播放器自己的控件 / 遮罩层」。
+/// 这类视图在暂停时会整屏弹出来（底色不透明、或带一张模糊快照），
+/// 长得跟「另一张照片页」很像，必须排除，否则一暂停就误判。
+static BOOL IVNameLooksLikePlayerChrome(NSString *name) {
+    if (name.length == 0) return NO;
+
+    static NSArray<NSString *> *keys = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        keys = @[ @"Control", @"Scrim", @"Dimming", @"Dim", @"Chrome",
+                  @"Backdrop", @"Blur", @"Transport", @"Playback" ];
+    });
+
+    for (NSString *k in keys) {
+        if ([name rangeOfString:k options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 /// 子树里是否存在「一块铺满屏幕的静态图像」——也就是另一张照片页。
 /// 相册翻页时旧页不会被移出层级，只是被新页盖住：几何上它仍然全屏，
 /// 所以只能靠「它上面压着一个有内容的全屏兄弟」来判定它已经不在前台。
+///
+/// 只认「真的画了一张图」的视图（layer.contents != nil）。
+/// 以前还有一条「不透明背景色 + 没有子视图」的兜底，本意是盖住用背景色画照片的
+/// 异常情况，实际却把**播放器暂停后弹出来的控件背景层**算了进去 ——
+/// 于是用户一点暂停，overlay 就被当成「已经切到别的照片」拆掉，
+/// 再点屏幕也唤不回来，只能退出重进视频。这条兜底必须去掉。
 static BOOL IVSubtreeShowsStaticImage(UIView *v, UIWindow *win, int depth, int *budget) {
     if (v == nil || depth > 6 || budget == NULL || *budget <= 0) return NO;
     (*budget)--;
     if (v.hidden || v.alpha < 0.30) return NO;
+
+    // 播放器自己的控件层不是「别的照片页」，整棵子树都不用看
+    if (IVNameLooksLikePlayerChrome(NSStringFromClass([v class]))) return NO;
 
     CGFloat winArea = win.bounds.size.width * win.bounds.size.height;
     if (winArea < 1.0) return NO;
@@ -80,11 +110,8 @@ static BOOL IVSubtreeShowsStaticImage(UIView *v, UIWindow *win, int depth, int *
     CGFloat area = f.size.width * f.size.height;
 
     if (area >= winArea * 0.45) {
-        // 有画面内容（UIImageView / 直接 setContents 的自绘视图）
+        // 有真实画面内容（UIImageView / 直接 setContents 的自绘视图）
         if (v.layer.contents != nil) return YES;
-
-        CGColorRef bg = v.backgroundColor.CGColor;
-        if (bg != NULL && CGColorGetAlpha(bg) > 0.9 && v.subviews.count == 0) return YES;
     }
 
     for (UIView *s in v.subviews) {
@@ -114,7 +141,8 @@ static BOOL IVPlayerNearEnd(AVPlayer *p) {
 }
 
 /// 在视频视图之上，找有没有一个「盖住大半个屏幕、而且里面是一张静态图」的兄弟视图。
-static UIView *IVPageOccluder(UIView *videoView, UIWindow *win) {
+/// exclude：我们自己挂上去的 glass overlay，它同样全屏，绝不能被当成遮挡物。
+static UIView *IVPageOccluder(UIView *videoView, UIWindow *win, UIView *exclude) {
     if (videoView == nil || win == nil) return nil;
 
     UIView *child = videoView;
@@ -128,6 +156,7 @@ static UIView *IVPageOccluder(UIView *videoView, UIWindow *win) {
             for (NSUInteger i = idx + 1; i < subs.count; i++) {
                 UIView *sib = subs[i];
                 if (sib.hidden || sib.alpha < 0.5) continue;
+                if (exclude != nil && sib == exclude) continue;
 
                 CGRect f = [sib convertRect:sib.bounds toView:win];
                 if (f.size.width < win.bounds.size.width * 0.85) continue;
@@ -235,6 +264,7 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     // 翻页手势期间先把控制层藏起来，松手后再恢复
     NSTimer                      *_reshowTimer;
     BOOL                          _hiddenByDrag;
+    NSTimeInterval                _lastDragTime;   // 最近一次横向滑动的时间戳
 }
 
 - (void)scan;
@@ -404,8 +434,17 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
         // 上层的过渡快照会造成误杀，所以播放中直接认为它在前台。
         // 播完停在最后一帧时也必须豁免（IVPlayerNearEnd），否则结尾画面会被
         // 当成「被别的照片盖住」，overlay 拆掉后再点画面就唤不出来了。
-        if (vv != nil && l.player.rate == 0.0 && !IVPlayerNearEnd(l.player)) {
-            UIView *occluder = IVPageOccluder(vv, w);
+        //
+        // 再加一道时间闸门：遮挡判定只用来解决「横滑过去之后旧视频页还挂着」，
+        // 所以只有刚发生过横向滑动的那几秒才允许它生效。
+        // 因为用户点暂停时 rate 同样是 0，而暂停会弹出整屏的原生控件层，
+        // 以前这里就会误判成「已经切到别的照片」把 overlay 拆掉 ——
+        // 表现正是「点了暂停插件就失效，必须退出重进视频」。
+        NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
+        BOOL inPageChange = (now - _lastDragTime) < 3.0;
+
+        if (inPageChange && vv != nil && l.player.rate == 0.0 && !IVPlayerNearEnd(l.player)) {
+            UIView *occluder = IVPageOccluder(vv, w, _overlay);
             if (occluder != nil) {
                 IVLog(@"skip occluded layer (%@ under %@)",
                       NSStringFromClass([vv class]), NSStringFromClass([occluder class]));
@@ -421,9 +460,9 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 
     if (best == nil) {
         // 所有候选都被别的页面盖住了：说明已经不在视频页，只是 player 还活着。
-        // 连续两次命中才动手，避开翻页动画里的瞬时快照。
+        // 连续三次命中才动手（约 0.54s），避开翻页动画里的瞬时快照。
         _occludedScans++;
-        if (_occludedScans >= 2) {
+        if (_occludedScans >= 3) {
             if (_overlay != nil) IVLog(@"teardown: every candidate layer is occluded");
             _occludedLayer = cands.firstObject;
             [self teardownOverlay];
@@ -488,6 +527,9 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
         // 不收起来就会看到按钮「飘在」正在滑入的那张照片上 —— 这就是所谓的错位。
         if (fabs(dx) > 12.0 && fabs(dx) > fabs(dy)) {
             _hiddenByDrag = YES;
+            // 记下时间：只有滑动之后的一小段时间里才允许遮挡判定生效，
+            // 这样「暂停」不会被误当成「翻页」（详见 scan 里的说明）。
+            _lastDragTime = [NSProcessInfo processInfo].systemUptime;
             IVGlassOverlay *ov = _overlay;
             dispatch_async(dispatch_get_main_queue(), ^{
                 [ov setChromeVisible:NO animated:YES];
