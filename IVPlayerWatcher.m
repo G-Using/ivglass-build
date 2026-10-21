@@ -222,6 +222,53 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
     }
 }
 
+#pragma mark - 触摸观察（点画面切换的兜底通道）
+
+- (void)observeTouchEvent:(UIEvent *)event inWindow:(UIWindow *)window {
+    if (_overlay == nil) return;
+    if (window != _hostWindow) return;
+
+    NSSet<UITouch *> *touches = [event allTouches];
+    if (touches.count != 1) return;
+
+    UITouch *t = touches.anyObject;
+    if (t == nil) return;
+
+    static UITouch *sTracked = nil;
+    static CGPoint sStart = {0.0, 0.0};
+    static NSTimeInterval sStartTime = 0.0;
+
+    if (t.phase == UITouchPhaseBegan) {
+        sTracked = t;
+        sStart = [t locationInView:window];
+        sStartTime = t.timestamp;
+        return;
+    }
+
+    if (t.phase == UITouchPhaseCancelled) {
+        if (sTracked == t) sTracked = nil;
+        return;
+    }
+
+    if (t.phase != UITouchPhaseEnded) return;
+    if (sTracked != t) return;
+
+    sTracked = nil;
+
+    CGPoint end = [t locationInView:window];
+    CGFloat dx = fabs(end.x - sStart.x);
+    CGFloat dy = fabs(end.y - sStart.y);
+    NSTimeInterval dt = t.timestamp - sStartTime;
+
+    // 短按 + 几乎无位移 = tap（滑动切图不会被判成 tap）
+    if (dx > 14.0 || dy > 14.0 || dt > 0.35) return;
+
+    IVGlassOverlay *ov = _overlay;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [ov handleExternalTapAt:end inView:window];
+    });
+}
+
 #pragma mark - 挂载 / 卸载
 
 - (void)mountOverlayForLayer:(AVPlayerLayer *)layer inWindow:(UIWindow *)win {
@@ -238,6 +285,9 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 
         _overlay = ov;
         _hostWindow = win;
+
+        IVLog(@"overlay mounted: win=%@ bounds=%@", NSStringFromClass([win class]),
+              NSStringFromCGRect(win.bounds));
     } else {
         _overlay.player = layer.player;
         [_overlay bindWindow:win];
