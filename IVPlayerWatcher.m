@@ -240,14 +240,16 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
         // 2) 得基本完整地摆在屏幕上。相册左右翻页时整页被平移出去，
         //    这一比值会立刻掉下来 —— 于是滑到照片的瞬间 overlay 就会卸载，
         //    而不会像原来那样跟着照片一起留在屏幕上。
-        if (clipArea / layerArea < 0.86) continue;
+        //    阈值取 0.72 而不是 0.95：画面若是 aspect-fill 会有轻微溢出，
+        //    卡太死会让某些视频根本不挂控件。
+        if (clipArea / layerArea < 0.72) continue;
 
         // 3) 横向要够宽（排除竖条形的画中画）
         if (clip.size.width < screen.width * 0.50) continue;
 
-        // 4) 大致居中，排除贴在角落的悬浮播放器
+        // 4) 中心得大致落在屏幕中线上：翻页过半后整页已经偏了，这里直接否掉
         CGFloat cx = CGRectGetMidX(clip);
-        if (fabs(cx - CGRectGetMidX(win.bounds)) > screen.width * 0.30) continue;
+        if (fabs(cx - CGRectGetMidX(win.bounds)) > screen.width * 0.20) continue;
 
         if (clipArea > bestArea) {
             bestArea = clipArea;
