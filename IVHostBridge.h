@@ -24,4 +24,14 @@ BOOL IVHostSetPlaying(UIWindow * _Nullable win, BOOL wantPlay, AVPlayer * _Nulla
 /// 同上，静音。原生那条栏的音量图标也归宿主管。
 BOOL IVHostSetMuted(UIWindow * _Nullable win, BOOL muted);
 
+/// 让原生控制栏的播放/暂停图标跟上 wantPlay。
+///
+/// 相册那条栏的图标不一定跟着 `desiredPlayState` 走（实测就不跟），
+/// 所以最后补一刀：找到那个原生播放/暂停按钮，读它的无障碍标签判断它
+/// 以为自己在播还是暂停，不一致就 `sendActionsForControlEvents:` 点它一下。
+/// 此时真实播放状态已经是 wantPlay，它那一下只会把图标纠正过来，不会改状态。
+///
+/// @return YES 表示找到了按钮并处理了（或本来就一致）。
+BOOL IVHostSyncPlayPauseIcon(UIWindow * _Nullable win, BOOL wantPlay, UIView * _Nullable skip);
+
 NS_ASSUME_NONNULL_END

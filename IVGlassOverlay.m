@@ -625,22 +625,27 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
     if (!viaHost) {
         if (wantPlay) [p play]; else [p pause];
-        return;
     }
 
-    // 宿主接下了，但各家实现不一定会立刻执行（有的等一次 runloop / 动画）。
-    // 0.45s 后核对一次，真的没动就补一刀，保证按键一定有反应。
+    // 0.32s 后做两件事：
+    //   1. 实际播放状态没变成想要的样子 —— 补一刀直接操作 player
+    //   2. 不管状态成没成，都去把原生那条栏的图标纠过来
+    //      （相册的图标不一定跟着 desiredPlayState 走，实测就是不跟）
     __weak typeof(self) ws = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.32 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         __strong typeof(ws) s = ws;
         if (s == nil) return;
+
         AVPlayer *pp = s.player;
         if (pp == nil) return;
-        if ([s isPlaying] == wantPlay) return;
 
-        IVLog(@"host bridge 没生效（want=%d），直接操作 player", wantPlay);
-        if (wantPlay) [pp play]; else [pp pause];
+        if ([s isPlaying] != wantPlay) {
+            IVLog(@"宿主没执行（want=%d），直接操作 player", wantPlay);
+            if (wantPlay) [pp play]; else [pp pause];
+        }
+
+        IVHostSyncPlayPauseIcon(s->_boundWindow ?: s.window, wantPlay, s);
         [s updatePlayState];
     });
 }

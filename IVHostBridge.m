@@ -64,6 +64,16 @@ static int IVPlaybackDesired(id vp) {
     }
 }
 
+/// 读当前的 desiredPlayState（纯诊断用）
+static long long IVCurrentDesiredPlayState(id vp) {
+    if (!IVResponds(vp, @"desiredPlayState")) return -1;
+    @try {
+        return ((long long (*)(id, SEL))objc_msgSend)(vp, NSSelectorFromString(@"desiredPlayState"));
+    } @catch (__unused NSException *e) {
+        return -1;
+    }
+}
+
 static BOOL IVSetDesiredPlayState(id vp, long long state) {
     @try {
         if (IVResponds(vp, @"setDesiredPlayState:reason:")) {
@@ -159,16 +169,131 @@ static id IVBrowsingPlayerFrom(UIViewController *vc) {
     return nil;
 }
 
+#pragma mark - 原生播放/暂停按钮（图标纠偏）
+
+static NSString *IVAccessibilityText(UIView *v) {
+    NSString *s = v.accessibilityLabel;
+    if (s.length == 0) s = v.accessibilityValue;
+    if (s.length > 0) return s;
+
+    for (UIView *sub in v.subviews) {
+        NSString *t = sub.accessibilityLabel;
+        if (t.length > 0) return t;
+    }
+    return nil;
+}
+
+/// 1 = 它认为自己正在播（所以按钮写的是「暂停」）
+/// 0 = 它认为自己已暂停（按钮写的是「播放」）
+/// -1 = 判断不了
+static int IVControlThinksPlaying(UIControl *c) {
+    NSString *text = IVAccessibilityText(c);
+    if (text.length == 0) return -1;
+
+    NSString *t = text.lowercaseString;
+    if ([t containsString:@"replay"] || [t containsString:@"airplay"] || [t containsString:@"display"]) {
+        return -1;
+    }
+    if ([t containsString:@"暂停"] || [t containsString:@"暫停"] || [t containsString:@"pause"]) return 1;
+    if ([t containsString:@"播放"] || [t containsString:@"play"] || [t containsString:@"继续"]) return 0;
+    return -1;
+}
+
+static UIControl *IVFindPlayPauseControl(UIView *root, UIView *skip, int depth, int *budget) {
+    if (root == nil || depth > 30 || budget == NULL || *budget <= 0) return nil;
+    (*budget)--;
+    if (root == skip) return nil;                 // 我们自己的 overlay 绝不算
+    if (root.hidden || root.alpha < 0.05) return nil;
+
+    if ([root isKindOfClass:[UIControl class]]) {
+        NSString *cls = NSStringFromClass([root class]);
+        NSString *low = cls.lowercaseString;
+        BOOL nameHit = [low containsString:@"playpause"] ||
+                       [low containsString:@"playbutton"] ||
+                       ([low containsString:@"play"] && ![low containsString:@"replay"]);
+        if (nameHit && root.window != nil &&
+            root.bounds.size.width > 1.0 && root.bounds.size.height > 1.0) {
+            UIControl *c = (UIControl *)root;
+            if (c.allTargets.count > 0) return c;
+        }
+    }
+
+    for (UIView *s in root.subviews) {
+        UIControl *r = IVFindPlayPauseControl(s, skip, depth + 1, budget);
+        if (r != nil) return r;
+    }
+    return nil;
+}
+
+/// 当前最该用的那个窗口。
+/// 不用 `keyWindow` —— 它在 iOS 13 就被标记废弃，多 scene 下还只返回全局随便一个，
+/// 编译期又会因为 `-Werror,-Wdeprecated-declarations` 直接失败。
+/// 这里遍历窗口，优先 key window，退而求其次取第一个可见且有根控制器的。
+static UIWindow *IVActiveWindow(void) {
+    UIApplication *app = [UIApplication sharedApplication];
+    if (app == nil) return nil;                 // 扩展进程里没有 UIApplication
+
+    UIWindow *fallback = nil;
+    for (UIWindow *w in app.windows) {
+        if (w.hidden) continue;
+        if (w.isKeyWindow) return w;
+        if (fallback == nil && w.rootViewController != nil) fallback = w;
+    }
+    return fallback;
+}
+
+BOOL IVHostSyncPlayPauseIcon(UIWindow *win, BOOL wantPlay, UIView *skip) {
+    UIWindow *target = win;
+    if (target == nil) {
+        target = skip.window;                   // 我们自己所在的窗口一定是对的
+    }
+    if (target == nil) {
+        target = IVActiveWindow();
+    }
+    if (target == nil) return NO;
+
+    int budget = 4000;
+    UIControl *c = IVFindPlayPauseControl(target, skip, 0, &budget);
+    if (c == nil) {
+        IVLog(@"icon sync: 没找到原生播放/暂停按钮");
+        return NO;
+    }
+
+    int thinks = IVControlThinksPlaying(c);
+    IVLog(@"icon sync: %@ label=%@ thinks=%d want=%d",
+          NSStringFromClass([c class]), IVAccessibilityText(c), thinks, wantPlay);
+
+    if (thinks < 0) return NO;                      // 判断不了就别乱点
+    if ((thinks == 1) == wantPlay) return YES;      // 图标已经是对的
+
+    // 真实播放状态此时已经是 wantPlay，它那一下只会把图标纠正过来
+    [c sendActionsForControlEvents:UIControlEventTouchUpInside];
+    IVLog(@"icon sync: 已点击 %@ 纠正图标", NSStringFromClass([c class]));
+    return YES;
+}
+
 #pragma mark - 对外
 
 BOOL IVHostSetPlaying(UIWindow *win, BOOL wantPlay, AVPlayer *player) {
     @try {
         NSArray<UIViewController *> *vcs = IVAllViewControllers(win);
 
+        // 排查用：把控制器链打出来，日志里能直接看到是哪个 App / 哪个版本的结构
+        NSMutableString *chain = [NSMutableString string];
+        for (UIViewController *vc in vcs) {
+            if (chain.length > 400) { [chain appendString:@"…"]; break; }
+            [chain appendFormat:@"%@ ", NSStringFromClass([vc class])];
+        }
+        IVLog(@"host bridge: 扫到 %lu 个控制器: %@", (unsigned long)vcs.count, chain);
+
         // 1) 相册：交给 PUBrowsingVideoPlayer，原生那条栏才会跟着刷新
         for (UIViewController *vc in vcs) {
             id vp = IVBrowsingPlayerFrom(vc);
             if (vp == nil) continue;
+
+            IVLog(@"host bridge: 找到 %@ (在 %@ 上)，当前 desiredPlayState=%lld",
+                  NSStringFromClass([vp class]), NSStringFromClass([vc class]),
+                  IVCurrentDesiredPlayState(vp));
 
             if (IVApplyPlayState(vp, wantPlay)) {
                 IVLog(@"host bridge: %@ -> %@", NSStringFromClass([vc class]), wantPlay ? @"play" : @"pause");
