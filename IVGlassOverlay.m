@@ -74,7 +74,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     _chromeVisible = YES;    // 整体默认可见
     _lastTapTime = 0.0;
 
-    IVLog(@"=== IVGlassPlayer 0.6.1 overlay init ===");
+    IVLog(@"=== IVGlassPlayer 0.6.2 overlay init ===");
 
     return self;
 }
@@ -161,9 +161,10 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 }
 
 - (void)onWindowTap:(UITapGestureRecognizer *)g {
-    // 只记日志，不执行切换 —— 唯一生效的切换入口是 sendEvent 观察通道。
-    // 两条通道都 toggle 会互相抵消，表现就是「点一下消失又自己出现」。
-    IVLog(@"onWindowTap state=%ld (passive)", (long)g.state);
+    if (g.state != UIGestureRecognizerStateEnded) return;
+    IVLog(@"onWindowTap fire");
+    CGPoint p = [g locationInView:self];
+    [self handleExternalTapAt:p inView:self];
 }
 
 /// 兜底入口：window tap 和 sendEvent 观察都会调到这里，靠时间戳去重。
