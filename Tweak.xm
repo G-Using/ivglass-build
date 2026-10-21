@@ -33,6 +33,17 @@
 
 %end
 
+// 触摸观察通道：只读不消费，用来识别「点画面切换控制层显隐」。
+// 比 window 手势更可靠 —— sendEvent 是触摸的唯一入口，收不到才怪。
+%hook UIWindow
+- (void)sendEvent:(UIEvent *)event {
+    %orig;
+    if (event.type == UIEventTypeTouches) {
+        [[IVPlayerWatcher shared] observeTouchEvent:event inWindow:self];
+    }
+}
+%end
+
 %ctor {
     // 进程白名单：视频壁纸会让 SpringBoard 里出现全屏 AVPlayerLayer，
     // Filter.plist 拦不住的场景在这里兜底 —— 不是目标 App 就完全不启用 hook。
