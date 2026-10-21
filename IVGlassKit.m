@@ -1,6 +1,7 @@
 #import "IVGlassKit.h"
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
+#import <objc/runtime.h>
 
 @implementation IVGlassView {
     CAGradientLayer *_sheen;
@@ -92,4 +93,51 @@ UIImage * _Nullable IVSymbol(NSString *name, CGFloat pointSize, CGFloat weightVa
                                                         weight:(UIImageSymbolWeight)weightValue];
     UIImage *img = [UIImage systemImageNamed:name withConfiguration:cfg];
     return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
+#pragma mark - 给现有视图套玻璃
+
+void IVGlassStyleExistingView(UIView *view, CGFloat cornerRadius) {
+    if (view == nil) return;
+
+    // 只处理一次：用关联标记，避免每帧扫描重复插层
+    static const void *kIVGlassAppliedKey = &kIVGlassAppliedKey;
+    if (objc_getAssociatedObject(view, kIVGlassAppliedKey) != nil) {
+        return;
+    }
+
+    CALayer *layer = view.layer;
+    layer.cornerCurve = kCACornerCurveContinuous;
+    layer.cornerRadius = cornerRadius;
+    layer.masksToBounds = YES;
+    layer.borderWidth = 0.7;
+    layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
+
+    // 毛玻璃垫底：盖在 view 自身背景之上、内容之下
+    UIBlurEffect *eff = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+    UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:eff];
+    blur.userInteractionEnabled = NO;
+    blur.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    blur.frame = view.bounds;
+    [view insertSubview:blur atIndex:0];
+
+    // 顶部高光
+    CAGradientLayer *sheen = [CAGradientLayer layer];
+    sheen.frame = view.bounds;
+    sheen.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:0.20].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.04].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.10].CGColor
+    ];
+    sheen.locations = @[@0.0, @0.5, @1.0];
+    sheen.startPoint = CGPointMake(0.5, 0.0);
+    sheen.endPoint = CGPointMake(0.5, 1.0);
+    [view.layer insertSublayer:sheen atIndex:0];
+
+    // 原背景若是纯色胶囊，压透明让毛玻璃透出来
+    if (view.backgroundColor != nil) {
+        view.backgroundColor = [view.backgroundColor colorWithAlphaComponent:0.18];
+    }
+
+    objc_setAssociatedObject(view, kIVGlassAppliedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
