@@ -272,11 +272,37 @@ static UIWindow *IVWindowForLayer(CALayer *layer) {
 #pragma mark - 挂载 / 卸载
 
 - (void)mountOverlayForLayer:(AVPlayerLayer *)layer inWindow:(UIWindow *)win {
-    if (_overlay != nil && (_hostWindow != win || _overlay.superview != win)) {
-        [self teardownOverlay];
+    BOOL needRebuild = NO;
+
+    if (_overlay != nil) {
+        if (_hostWindow != win) {
+            needRebuild = YES;
+        } else if (_overlay.superview != win) {
+            // 只是从层级里掉了（相册重排视图时会发生）。
+            // 注意：绝不能在这里重建 —— 新建的 overlay 默认可见，
+            // 会把用户刚点隐藏的控制层「自己弹回来」。
+            [win addSubview:_overlay];
+            IVLog(@"overlay re-attached, chromeVisible=%d", _overlay.chromeVisible);
+        }
     }
 
-    if (_overlay == nil) {
+    if (needRebuild) {
+        BOOL wasVisible = _overlay.chromeVisible;
+        [self teardownOverlay];
+
+        IVGlassOverlay *ov = [[IVGlassOverlay alloc] initWithFrame:win.bounds];
+        ov.player = layer.player;
+        [win addSubview:ov];
+        [ov bindWindow:win];
+        [ov startTracking];
+        [ov setChromeVisible:wasVisible animated:NO];
+
+        _overlay = ov;
+        _hostWindow = win;
+
+        IVLog(@"overlay rebuilt: win=%@ visible=%d",
+              NSStringFromClass([win class]), wasVisible);
+    } else if (_overlay == nil) {
         IVGlassOverlay *ov = [[IVGlassOverlay alloc] initWithFrame:win.bounds];
         ov.player = layer.player;
         [win addSubview:ov];
