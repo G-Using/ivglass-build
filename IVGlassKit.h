@@ -38,6 +38,9 @@ void IVHaptic(void);
 /// SF Symbol，模板渲染（跟随 tintColor）
 UIImage * _Nullable IVSymbol(NSString *name, CGFloat pointSize, CGFloat weightValue);
 
+/// 落盘日志：/var/mobile/Documents/IVGlassPlayer.log（「文件」App 里能直接看）
+void IVLog(NSString * _Nonnull format, ...) NS_FORMAT_FUNCTION(1, 2);
+
 #ifdef __cplusplus
 }
 #endif
