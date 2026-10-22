@@ -60,7 +60,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 /// 播放 / 暂停：优先交给宿主状态机，保证原生那条控制栏跟着变
 - (void)setPlayingViaHost:(BOOL)wantPlay;
 /// 播/暂停之后的自查，attempt 只是防死循环
-- (void)verifyPlayState:(BOOL)wantPlay attempt:(int)attempt;
+- (void)verifyPlayState:(BOOL)wantPlay attempt:(int)attempt action:(IVHostAction)action;
 @end
 
 @implementation IVGlassOverlay
@@ -641,11 +641,11 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
         __strong typeof(ws) s = ws;
         if (s == nil) return;
         if (s.player == nil) return;
-        [s verifyPlayState:wantPlay attempt:0];
+        [s verifyPlayState:wantPlay attempt:0 action:action];
     });
 }
 
-- (void)verifyPlayState:(BOOL)wantPlay attempt:(int)attempt {
+- (void)verifyPlayState:(BOOL)wantPlay attempt:(int)attempt action:(IVHostAction)action {
     AVPlayer *p = self.player;
     if (p == nil) return;
 
@@ -654,10 +654,10 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
         return;
     }
 
-    // 第一次没成，再找一次宿主：
-    // 相册的原生控制栏是自动隐藏的，藏起来的时候按钮可能整棵子树被移走，
-    // 0.35 秒后它常常又回来了，这会儿再点就点得到。
-    if (attempt == 0) {
+    // 只有「压根没找到宿主」才值得再点一次按钮。
+    // 已经点过（Button / StateMachine / AVKit）却仍没生效时再点一次很危险：
+    // 相册那个按钮是 toggle，再点一下正好把状态切回去，视频自己又播起来。
+    if (attempt == 0 && action == IVHostActionNone) {
         IVHostAction again = IVHostSetPlaying(_boundWindow ?: self.window, wantPlay, p, self);
         if (again != IVHostActionNone) {
             IVLog(@"宿主第一次没生效，换 %ld 再来一次", (long)again);
@@ -665,13 +665,14 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.30 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 __strong typeof(ws) s = ws;
-                if (s != nil) [s verifyPlayState:wantPlay attempt:1];
+                if (s != nil) [s verifyPlayState:wantPlay attempt:1 action:again];
             });
             return;
         }
     }
 
-    IVLog(@"宿主没执行（want=%d attempt=%d），直接操作 player", wantPlay, attempt);
+    IVLog(@"宿主没生效（want=%d action=%ld attempt=%d），直接操作 player",
+          wantPlay, (long)action, attempt);
     if (wantPlay) [p play]; else [p pause];
     [self updatePlayState];
 }

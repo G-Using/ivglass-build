@@ -388,10 +388,142 @@ static UIControl *IVFindPlayPauseControl(UIWindow *win, UIView *skip, BOOL wantP
     return best;
 }
 
+#pragma mark - 工具栏里的 UIBarButtonItem（相册）
+
+/// 相册底部那条栏的播放/暂停**不是 UIView**，是 `UIBarButtonItem`：
+///   · 它在 `UIToolbar.items` 里，遍历 subviews 永远扫不到
+///   · 文字写在 `title` 里（实测「暂停」/「播放」），`accessibilityLabel` 是 nil
+///   · target 是 `PUOneUpBarsController`，action 是 `barButtonItemTapped:`
+/// 所以只能顺着 UIToolbar.items 找，然后照原样发一次 target/action ——
+/// 这就是手指点下去走的那条路。
+static void IVCollectToolbars(UIView *root, UIView *skip, int depth,
+                              int *budget, NSMutableArray<UIToolbar *> *out) {
+    if (root == nil || depth > 40 || budget == NULL || *budget <= 0 || out.count >= 24) return;
+    (*budget)--;
+    if (root == skip) return;
+
+    if ([root isKindOfClass:[UIToolbar class]]) {
+        [out addObject:(UIToolbar *)root];
+    }
+    for (UIView *s in root.subviews) {
+        IVCollectToolbars(s, skip, depth + 1, budget, out);
+    }
+}
+
+static NSString *IVBarItemText(UIBarButtonItem *it) {
+    if (it == nil) return nil;
+    if (it.title.length > 0) return it.title;
+    NSString *l = it.accessibilityLabel;
+    if (l.length > 0) return l;
+    UIView *cv = it.customView;
+    if (cv != nil) return IVAccessibilityText(cv, 0);
+    return nil;
+}
+
+/// 找宿主工具栏里的播放/暂停项。
+/// 只认文本恰好是「播放」/「暂停」的项 —— 相册那条栏里还有「收藏」「静音」「信息」，
+/// 用 contains 匹配太容易误伤。
+static UIBarButtonItem *IVFindPlayPauseBarItem(UIWindow *win, UIView *skip,
+                                               BOOL wantPlay, int *thinksOut) {
+    NSMutableArray<UIToolbar *> *bars = [NSMutableArray array];
+    int budget = 6000;
+    for (UIWindow *w in IVSearchWindows(win, skip)) {
+        if (budget <= 0 || bars.count >= 24) break;
+        IVCollectToolbars(w, skip, 0, &budget, bars);
+    }
+
+    UIBarButtonItem *best = nil;
+    int bestScore = -1;
+    int bestThinks = -1;
+    NSMutableString *report = [NSMutableString string];
+
+    for (UIToolbar *tb in bars) {
+        BOOL barVisible = (tb.window != nil && !tb.hidden && tb.alpha > 0.05);
+        for (UIBarButtonItem *it in tb.items) {
+            NSString *text = IVBarItemText(it);
+            if (text.length == 0) continue;
+
+            if (report.length < 700) {
+                [report appendFormat:@"\n      · 「%@」 target=%@ action=%@ enabled=%d",
+                                       text,
+                                       it.target != nil ? NSStringFromClass([it.target class]) : @"nil",
+                                       it.action != NULL ? NSStringFromSelector(it.action) : @"null",
+                                       (int)it.enabled];
+            }
+
+            if (!IVTextIsExactlyPlayPause(text)) continue;
+            int thinks = IVThinksPlayingFromText(text);
+            if (thinks < 0) continue;
+            if (it.target == nil || it.action == NULL) continue;
+
+            int score = 0;
+            if ((thinks == 1) != wantPlay) score += 8;   // 状态不一致的优先
+            if (barVisible) score += 4;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = it;
+                bestThinks = thinks;
+            }
+        }
+    }
+
+    if (thinksOut != NULL) *thinksOut = bestThinks;
+
+    if (best == nil) {
+        static int dumps = 0;
+        if (dumps < 3 && bars.count > 0) {
+            dumps++;
+            IVLog(@"host bridge: 工具栏里没匹配到播放/暂停（%lu 条栏）：%@",
+                  (unsigned long)bars.count, report.length > 0 ? report : @"(空)");
+        }
+    }
+    return best;
+}
+
+/// 照原样触发一次 UIBarButtonItem。
+/// 不用 `sendAction:to:from:forEvent:` —— 实测对这套 target/action 返回 YES 却不真调用
+/// （hook 挂上去一次都没进），必须直接 msgSend。
+static BOOL IVTriggerBarItem(UIBarButtonItem *it) {
+    if (it == nil) return NO;
+    id target = it.target;
+    SEL action = it.action;
+    if (target == nil || action == NULL) return NO;
+
+    @try {
+        ((void (*)(id, SEL, id))objc_msgSend)(target, action, it);
+        IVLog(@"host bridge: 已触发 %@ -%@",
+              NSStringFromClass([target class]), NSStringFromSelector(action));
+        return YES;
+    } @catch (NSException *e) {
+        IVLog(@"host bridge: 触发 %@ -%@ 抛异常 —— %@",
+              NSStringFromClass([target class]), NSStringFromSelector(action), e.reason);
+        return NO;
+    }
+}
+
 #pragma mark - 对外
 
 IVHostAction IVHostSetPlaying(UIWindow *win, BOOL wantPlay, AVPlayer *player, UIView *skip) {
     @try {
+        // ── 0. 相册：点工具栏里的播放/暂停 UIBarButtonItem ─────────────
+        //    这条路就是手指点下去走的同一条：宿主自己算状态、自己刷图标，
+        //    两边不可能不一致。相册那个按钮不是 UIView，之前所有按视图树
+        //    找按钮的尝试在相册里注定落空。
+        int barThinks = -1;
+        UIBarButtonItem *barItem = IVFindPlayPauseBarItem(win, skip, wantPlay, &barThinks);
+        if (barItem != nil) {
+            IVLog(@"host bridge: 工具栏按钮「%@」thinks=%d want=%d",
+                  IVBarItemText(barItem), barThinks, wantPlay);
+
+            if ((barThinks == 1) != wantPlay) {
+                if (IVTriggerBarItem(barItem)) return IVHostActionButton;
+            } else {
+                IVLog(@"host bridge: 工具栏图标已经一致，不用点");
+                return IVHostActionNone;
+            }
+        }
+
         NSArray<UIViewController *> *vcs = IVAllViewControllers(win);
 
         // ── 1. 相册：PUBrowsingVideoPlayer 的状态机 ────────────────────

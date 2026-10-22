@@ -1,6 +1,6 @@
 Package: com.gusing.ivglassplayer
 Name: 相册文件视频进度条
-Version: 0.7.5
+Version: 0.7.6
 Architecture: iphoneos-arm64
 Description: iOS 26 风格的玻璃视频控制层。底部胶囊进度条、长按展开为可拖动时间轴、中央玻璃按钮组（后退15秒 / 暂停 / 前进15秒），用于「照片」与「文件」App 的全屏视频播放。
 Maintainer: G-Using
