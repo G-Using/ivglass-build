@@ -107,6 +107,47 @@ UIImage * _Nullable IVSymbol(NSString *name, CGFloat pointSize, CGFloat weightVa
 
 #pragma mark - 落盘日志
 
+/// 日志落在哪。
+///
+/// 以前写死 `/var/mobile/Media/IVGlassPlayer.log`，但相册是沙盒 App，
+/// 对那个目录根本没有写权限 —— `writeToFile:error:` 我们传了 nil，
+/// 失败也不吭声，结果就是「日志文件压根不存在」，排查时等于瞎子。
+///
+/// 现在按顺序试几个位置，挑第一个写得进去的：
+///   1. App 自己的 tmp（一定写得进去，Filza 里能找到）
+///   2. App 的 Documents
+///   3. /var/mobile/Media（越狱环境下有的机器能写）
+static NSString *IVLogPath(void) {
+    static NSString *path = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableArray<NSString *> *cands = [NSMutableArray array];
+        NSString *tmp = NSTemporaryDirectory();
+        if (tmp.length > 0) [cands addObject:[tmp stringByAppendingPathComponent:@"IVGlassPlayer.log"]];
+
+        NSString *home = NSHomeDirectory();
+        if (home.length > 0) {
+            [cands addObject:[home stringByAppendingPathComponent:@"Documents/IVGlassPlayer.log"]];
+        }
+        [cands addObject:@"/var/mobile/Media/IVGlassPlayer.log"];
+
+        NSFileManager *fm = [NSFileManager defaultManager];
+        for (NSString *c in cands) {
+            // 真写一次探测，别信 fileExists / isWritableFile
+            NSData *probe = [@"" dataUsingEncoding:NSUTF8StringEncoding];
+            if ([fm createFileAtPath:c contents:probe attributes:nil]) {
+                path = c;
+                return;
+            }
+            if ([fm isWritableFileAtPath:c]) {
+                path = c;
+                return;
+            }
+        }
+    });
+    return path;
+}
+
 void IVLog(NSString *format, ...) {
     if (format.length == 0) return;
 
@@ -115,12 +156,16 @@ void IVLog(NSString *format, ...) {
     NSString *msg = [[NSString alloc] initWithFormat:format arguments:ap];
     va_end(ap);
 
+    NSLog(@"[IVGlass] %@", msg);
+
     NSDateFormatter *df = [[NSDateFormatter alloc] init];
     df.dateFormat = @"HH:mm:ss.SSS";
     NSString *line = [NSString stringWithFormat:@"[%@] %@\n",
                       [df stringFromDate:[NSDate date]], msg];
 
-    static NSString *const kLogPath = @"/var/mobile/Media/IVGlassPlayer.log";
+    NSString *kLogPath = IVLogPath();
+    if (kLogPath.length == 0) return;
+
     NSFileManager *fm = [NSFileManager defaultManager];
 
     if (![fm fileExistsAtPath:kLogPath]) {
@@ -146,6 +191,11 @@ void IVLog(NSString *format, ...) {
     } @catch (__unused NSException *ex) {
         // 写日志失败不影响主流程
     }
+}
+
+/// 当前日志文件绝对路径，方便排查时告诉用户去哪找
+NSString *IVLogFilePath(void) {
+    return IVLogPath();
 }
 
 #pragma mark - 给现有视图套玻璃

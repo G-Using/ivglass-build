@@ -94,48 +94,69 @@ static BOOL IVSetDesiredPlayState(id vp, long long state) {
     return NO;
 }
 
+/// 在宿主的 changes 块里改状态。
+///
+/// `PUViewModel` 的 setter **只能在 `performChanges:` 的块里调用**。
+/// 在外面直接 `setDesiredPlayState:` 会命中 `-[PUViewModel assertInsideChangesBlock]`，
+/// 抛 NSException —— 真机上直接 abort，整个相册闪退（崩溃栈就是这个）。
+/// 所以哪怕枚举值猜对了，不走这个块也一定失败：异常被 @try 吞掉，
+/// 状态没变、图标不动，表现就是「点了没反应」。
+static BOOL IVPerformChanges(id vp, void (^changes)(void)) {
+    if (changes == nil || !IVResponds(vp, @"performChanges:")) return NO;
+    @try {
+        ((void (*)(id, SEL, id))objc_msgSend)(vp, NSSelectorFromString(@"performChanges:"), changes);
+        return YES;
+    } @catch (__unused NSException *e) {
+        IVLog(@"performChanges: 抛异常 %@", e.reason);
+        return NO;
+    }
+}
+
 /// 让状态机切到 wantPlay。
 ///
-/// 两道：
-///   1. 先调它自己的 `play` / `pause` —— 和原生按钮点下去是同一回事，最贴谱
-///   2. 再直接写 `desiredPlayState`。这个枚举各版本取值不一定一样
-///      （可能是 {Unknown=0, Playing=1, Paused=2}，也可能是别的），
-///      所以每写一次就用 `isPlaybackDesired` 校验一次，对不上就换下一个候选。
-///      **故意不把「1=播放」放进暂停的候选里** —— 万一对不上，宁可判失败让上层
-///      去点按钮，也不能因为试探而把视频重新放起来。
+/// 只能在 `performChanges:` 里改（见上）。枚举取值各版本不一定一样，
+/// 所以每写一次就用 `isPlaybackDesired` 校验一次，对不上就换下一个候选。
 ///
-/// 只有「校验通过」才算成功；校验不了（没有 `isPlaybackDesired`）也判失败，
-/// 让上层继续往下试更可靠的路子。
+/// 候选顺序按实测：iOS 16.5 上 `desiredPlayState` 暂停是 0、播放是 1
+/// （暂停时读到的就是 `desired=0 playState=2`），2 才是那个不确定的兜底值。
+///
+/// **故意不把「1=播放」放进暂停的候选里**：宁可判失败让上层去点按钮，
+/// 也不能因为试探而把视频重新放起来。
 static BOOL IVApplyPlayState(id vp, BOOL wantPlay) {
-    NSString *selName = wantPlay ? @"play" : @"pause";
-    if (IVResponds(vp, selName)) {
-        @try {
-            ((void (*)(id, SEL))objc_msgSend)(vp, NSSelectorFromString(selName));
-        } @catch (__unused NSException *e) { }
-        int got = IVPlaybackDesired(vp);
-        if (got >= 0 && ((got == 1) == wantPlay)) return YES;
-        IVLog(@"状态机的 -%@ 没起作用（isPlaybackDesired=%d），改写 desiredPlayState", selName, got);
+    if (!IVResponds(vp, @"performChanges:")) {
+        IVLog(@"%@ 没有 performChanges:，不能直接改它的状态",
+              NSStringFromClass([vp class]));
+        return NO;
     }
 
-    long long cand[2];
+    long long cands[2];
     int n = 0;
     if (wantPlay) {
-        cand[n++] = 1;
-        cand[n++] = 2;
+        cands[n++] = 1;
+        cands[n++] = 2;
     } else {
-        cand[n++] = 2;
-        cand[n++] = 0;
+        cands[n++] = 0;
+        cands[n++] = 2;
     }
 
     for (int i = 0; i < n; i++) {
-        if (!IVSetDesiredPlayState(vp, cand[i])) continue;
+        long long v = cands[i];
+
+        BOOL ok = IVPerformChanges(vp, ^{
+            IVSetDesiredPlayState(vp, v);
+        });
+        if (!ok) continue;
+
         int got = IVPlaybackDesired(vp);
         if (got < 0) {
-            IVLog(@"desiredPlayState 没法校验，判失败");
+            IVLog(@"isPlaybackDesired 读不到，判失败");
             return NO;
         }
-        if ((got == 1) == wantPlay) return YES;
-        IVLog(@"desiredPlayState=%lld 不对（isPlaybackDesired=%d），换下一个", cand[i], got);
+        if ((got == 1) == wantPlay) {
+            if (i > 0) IVLog(@"desiredPlayState 得用 %lld 才生效", v);
+            return YES;
+        }
+        IVLog(@"desiredPlayState=%lld 没生效（isPlaybackDesired=%d），换下一个", v, got);
     }
     return NO;
 }
@@ -371,9 +392,45 @@ static UIControl *IVFindPlayPauseControl(UIWindow *win, UIView *skip, BOOL wantP
 
 IVHostAction IVHostSetPlaying(UIWindow *win, BOOL wantPlay, AVPlayer *player, UIView *skip) {
     @try {
-        // ── 1. 点宿主自己的播放/暂停按钮 ──────────────────────────────
-        //    这是唯一「状态和图标必然一起变」的做法：跟用户手指点下去一样。
-        //    文件 / AVKit 也走这条，行为一致。
+        NSArray<UIViewController *> *vcs = IVAllViewControllers(win);
+
+        // ── 1. 相册：PUBrowsingVideoPlayer 的状态机 ────────────────────
+        //    相册底部那个播放/暂停是 **UIBarButtonItem**（由
+        //    PUPlayPauseBarItemsController 管），根本不是 UIView ——
+        //    在视图树里按类名/无障碍标签找，永远找不到。
+        //    所以相册只能走状态机，而且必须包在 performChanges: 里。
+        id hit = nil;
+        UIViewController *hitVC = nil;
+
+        for (UIViewController *vc in vcs) {
+            id vp = IVBrowsingPlayerFrom(vc);
+            if (vp == nil) continue;
+
+            if (hit == nil) { hit = vp; hitVC = vc; }
+
+            // 能读到 avPlayer 的才是「当前这个」，优先挑和我们手上 player 同一个的
+            id ap = IVGetProp(vp, @"avPlayer");
+            if (ap != nil) {
+                if (player != nil && ap == (id)player) { hit = vp; hitVC = vc; break; }
+                hit = vp;
+                hitVC = vc;
+            }
+        }
+
+        if (hit != nil) {
+            IVLog(@"host bridge: 状态机 %@（在 %@ 上）当前 desiredPlayState=%lld",
+                  NSStringFromClass([hit class]), NSStringFromClass([hitVC class]),
+                  IVCurrentDesiredPlayState(hit));
+
+            if (IVApplyPlayState(hit, wantPlay)) {
+                IVLog(@"host bridge: 状态机 -> %@", wantPlay ? @"play" : @"pause");
+                return IVHostActionStateMachine;
+            }
+            IVLog(@"host bridge: 状态机没生效，继续找按钮");
+        }
+
+        // ── 2. 视图树里的播放/暂停按钮（文件 / AVKit）─────────────────
+        //    和用户手指点下去一样的路径，状态和图标必然一起变。
         int thinks = -1;
         UIControl *btn = IVFindPlayPauseControl(win, skip, wantPlay, &thinks);
         if (btn != nil) {
@@ -385,35 +442,8 @@ IVHostAction IVHostSetPlaying(UIWindow *win, BOOL wantPlay, AVPlayer *player, UI
                 IVLog(@"host bridge: 已点击原生按钮 -> %@", wantPlay ? @"play" : @"pause");
                 return IVHostActionButton;
             }
-            // 图标已经和想要的一致：宿主状态本来就是对的，
-            // 直接返回 None 让上层去兜底处理 player 本身（多半是个空操作）。
             IVLog(@"host bridge: 原生图标已经一致，不用点");
             return IVHostActionNone;
-        }
-
-        // ── 2. 相册的状态机 ────────────────────────────────────────────
-        NSArray<UIViewController *> *vcs = IVAllViewControllers(win);
-
-        NSMutableString *chain = [NSMutableString string];
-        for (UIViewController *vc in vcs) {
-            if (chain.length > 400) { [chain appendString:@"…"]; break; }
-            [chain appendFormat:@"%@ ", NSStringFromClass([vc class])];
-        }
-        IVLog(@"host bridge: 扫到 %lu 个控制器: %@", (unsigned long)vcs.count, chain);
-
-        for (UIViewController *vc in vcs) {
-            id vp = IVBrowsingPlayerFrom(vc);
-            if (vp == nil) continue;
-
-            IVLog(@"host bridge: 找到 %@ (在 %@ 上)，当前 desiredPlayState=%lld",
-                  NSStringFromClass([vp class]), NSStringFromClass([vc class]),
-                  IVCurrentDesiredPlayState(vp));
-
-            if (IVApplyPlayState(vp, wantPlay)) {
-                IVLog(@"host bridge: %@ -> %@", NSStringFromClass([vc class]),
-                      wantPlay ? @"play" : @"pause");
-                return IVHostActionStateMachine;
-            }
         }
 
         // ── 3. AVKit 的播放控制器 ──────────────────────────────────────
@@ -447,8 +477,11 @@ BOOL IVHostSetMuted(UIWindow *win, BOOL muted) {
             if (vp == nil) continue;
             if (!IVResponds(vp, @"setMuted:")) continue;
 
-            ((void (*)(id, SEL, BOOL))objc_msgSend)(vp, NSSelectorFromString(@"setMuted:"), muted);
-            return YES;
+            // 同样必须在 performChanges: 里改，否则命中 PUViewModel 的断言
+            BOOL ok = IVPerformChanges(vp, ^{
+                ((void (*)(id, SEL, BOOL))objc_msgSend)(vp, NSSelectorFromString(@"setMuted:"), muted);
+            });
+            if (ok) return YES;
         }
     } @catch (__unused NSException *e) {
         IVLog(@"host bridge(静音) 异常：%@", e.reason);
