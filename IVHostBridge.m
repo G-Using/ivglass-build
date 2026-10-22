@@ -49,9 +49,11 @@ static BOOL IVResponds(id obj, NSString *selName) {
 /// 相册的播放状态机：`PUBrowsingVideoPlayer`。
 static BOOL IVLooksLikeBrowsingPlayer(id o) {
     if (o == nil) return NO;
-    if (!IVResponds(o, @"desiredPlayState")) return NO;
-    return IVResponds(o, @"setDesiredPlayState:reason:") ||
-           IVResponds(o, @"setDesiredPlayState:");
+    if (IVResponds(o, @"desiredPlayState") || IVResponds(o, @"setDesiredPlayState:reason:")) {
+        return IVResponds(o, @"setDesiredPlayState:reason:") ||
+               IVResponds(o, @"setDesiredPlayState:");
+    }
+    return NO;
 }
 
 /// 读 `isPlaybackDesired`：1 = 想播, 0 = 想停, -1 = 没有该属性
@@ -92,19 +94,50 @@ static BOOL IVSetDesiredPlayState(id vp, long long state) {
     return NO;
 }
 
-/// 设置并自校验：不同 iOS 版本这个枚举的取值不一定一样，
-/// 所以写完读一次 `isPlaybackDesired`，对不上就换另一个值再来一次。
+/// 让状态机切到 wantPlay。
+///
+/// 两道：
+///   1. 先调它自己的 `play` / `pause` —— 和原生按钮点下去是同一回事，最贴谱
+///   2. 再直接写 `desiredPlayState`。这个枚举各版本取值不一定一样
+///      （可能是 {Unknown=0, Playing=1, Paused=2}，也可能是别的），
+///      所以每写一次就用 `isPlaybackDesired` 校验一次，对不上就换下一个候选。
+///      **故意不把「1=播放」放进暂停的候选里** —— 万一对不上，宁可判失败让上层
+///      去点按钮，也不能因为试探而把视频重新放起来。
+///
+/// 只有「校验通过」才算成功；校验不了（没有 `isPlaybackDesired`）也判失败，
+/// 让上层继续往下试更可靠的路子。
 static BOOL IVApplyPlayState(id vp, BOOL wantPlay) {
-    long long first = wantPlay ? 1 : 0;
-    if (!IVSetDesiredPlayState(vp, first)) return NO;
-
-    int got = IVPlaybackDesired(vp);
-    if (got >= 0 && ((got == 1) != wantPlay)) {
-        long long alt = wantPlay ? 0 : 1;
-        IVLog(@"desiredPlayState 映射反了，%lld 不行改 %lld", first, alt);
-        IVSetDesiredPlayState(vp, alt);
+    NSString *selName = wantPlay ? @"play" : @"pause";
+    if (IVResponds(vp, selName)) {
+        @try {
+            ((void (*)(id, SEL))objc_msgSend)(vp, NSSelectorFromString(selName));
+        } @catch (__unused NSException *e) { }
+        int got = IVPlaybackDesired(vp);
+        if (got >= 0 && ((got == 1) == wantPlay)) return YES;
+        IVLog(@"状态机的 -%@ 没起作用（isPlaybackDesired=%d），改写 desiredPlayState", selName, got);
     }
-    return YES;
+
+    long long cand[2];
+    int n = 0;
+    if (wantPlay) {
+        cand[n++] = 1;
+        cand[n++] = 2;
+    } else {
+        cand[n++] = 2;
+        cand[n++] = 0;
+    }
+
+    for (int i = 0; i < n; i++) {
+        if (!IVSetDesiredPlayState(vp, cand[i])) continue;
+        int got = IVPlaybackDesired(vp);
+        if (got < 0) {
+            IVLog(@"desiredPlayState 没法校验，判失败");
+            return NO;
+        }
+        if ((got == 1) == wantPlay) return YES;
+        IVLog(@"desiredPlayState=%lld 不对（isPlaybackDesired=%d），换下一个", cand[i], got);
+    }
+    return NO;
 }
 
 #pragma mark - 视图控制器遍历
@@ -150,135 +183,217 @@ static id IVBrowsingPlayerFrom(UIViewController *vc) {
     if (vc == nil) return nil;
 
     static NSArray<NSString *> *vmKeys = nil;
+    static NSArray<NSString *> *playerKeys = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        vmKeys = @[ @"browsingViewModel", @"viewModel", @"oneUpViewModel" ];
+        vmKeys = @[ @"browsingViewModel", @"viewModel", @"oneUpViewModel",
+                    @"photoBrowserViewModel", @"videoViewModel", @"assetViewModel" ];
+        playerKeys = @[ @"videoPlayer", @"videoPlayerModel", @"player", @"videoController" ];
     });
 
     for (NSString *key in vmKeys) {
         id vm = IVGetProp(vc, key);
         if (vm == nil) continue;
 
-        id vp = IVGetProp(vm, @"videoPlayer");
-        if (IVLooksLikeBrowsingPlayer(vp)) return vp;
+        for (NSString *pk in playerKeys) {
+            id vp = IVGetProp(vm, pk);
+            if (IVLooksLikeBrowsingPlayer(vp)) return vp;
+        }
+        // 有些版本 viewModel 自己就是状态机
+        if (IVLooksLikeBrowsingPlayer(vm)) return vm;
     }
 
-    id vp = IVGetProp(vc, @"videoPlayer");
-    if (IVLooksLikeBrowsingPlayer(vp)) return vp;
+    for (NSString *pk in playerKeys) {
+        id vp = IVGetProp(vc, pk);
+        if (IVLooksLikeBrowsingPlayer(vp)) return vp;
+    }
 
     return nil;
 }
 
-#pragma mark - 原生播放/暂停按钮（图标纠偏）
+#pragma mark - 原生播放/暂停按钮
 
-static NSString *IVAccessibilityText(UIView *v) {
+/// 取无障碍文本（按钮的图标状态就写在这里）。
+/// 相册的按钮经常是「容器 UIControl + 里面一个图标 view」，
+/// 所以往里挖三层。
+static NSString *IVAccessibilityText(UIView *v, int depth) {
+    if (v == nil || depth > 3) return nil;
+
     NSString *s = v.accessibilityLabel;
-    if (s.length == 0) s = v.accessibilityValue;
+    if (s.length > 0) return s;
+    s = v.accessibilityValue;
     if (s.length > 0) return s;
 
     for (UIView *sub in v.subviews) {
-        NSString *t = sub.accessibilityLabel;
+        NSString *t = IVAccessibilityText(sub, depth + 1);
         if (t.length > 0) return t;
     }
     return nil;
 }
 
-/// 1 = 它认为自己正在播（所以按钮写的是「暂停」）
+/// 1 = 它认为自己正在播（所以按钮的文字是「暂停」）
 /// 0 = 它认为自己已暂停（按钮写的是「播放」）
-/// -1 = 判断不了
-static int IVControlThinksPlaying(UIControl *c) {
-    NSString *text = IVAccessibilityText(c);
+/// -1 = 判断不了 / 不是播放暂停按钮
+static int IVThinksPlayingFromText(NSString *text) {
     if (text.length == 0) return -1;
 
     NSString *t = text.lowercaseString;
-    if ([t containsString:@"replay"] || [t containsString:@"airplay"] || [t containsString:@"display"]) {
-        return -1;
+
+    // 这些控件身上也常带「播放」二字，但点下去不是播/暂停：
+    // 进度条、音量、全屏、编辑、分享……一律排掉，宁可不动。
+    static NSArray<NSString *> *banned = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        banned = @[ @"replay", @"airplay", @"display",
+                    @"进度", @"進度", @"progress", @"seek",
+                    @"时间", @"時間", @"时长", @"時長", @"duration", @"timecode",
+                    @"音量", @"volume", @"静音", @"mute",
+                    @"全屏", @"畫中畫", @"画中画", @"fullscreen", @"full screen", @"pip",
+                    @"编辑", @"編輯", @"edit", @"分享", @"share",
+                    @"返回", @"back", @"关闭", @"關閉", @"close", @"完成", @"done",
+                    @"删除", @"刪除", @"delete", @"收藏", @"favorite", @"更多", @"more",
+                    @"信息", @"資訊", @"info", @"位置", @"location", @"实况", @"原況", @"live" ];
+    });
+    for (NSString *b in banned) {
+        if ([t containsString:b]) return -1;
     }
+
+    // 先判「暂停」：「暂停」里没有「播放」，但先判更稳，也不受语言包差异影响
     if ([t containsString:@"暂停"] || [t containsString:@"暫停"] || [t containsString:@"pause"]) return 1;
-    if ([t containsString:@"播放"] || [t containsString:@"play"] || [t containsString:@"继续"]) return 0;
+    if ([t containsString:@"播放"] || [t containsString:@"play"] ||
+        [t containsString:@"继续"] || [t containsString:@"繼續"]) return 0;
     return -1;
 }
 
-static UIControl *IVFindPlayPauseControl(UIView *root, UIView *skip, int depth, int *budget) {
-    if (root == nil || depth > 30 || budget == NULL || *budget <= 0) return nil;
+/// 文本是不是干脆就是「播放」/「暂停」这种，越纯越可信
+static BOOL IVTextIsExactlyPlayPause(NSString *text) {
+    static NSSet<NSString *> *exact = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        exact = [NSSet setWithArray:@[ @"播放", @"暂停", @"暫停", @"继续", @"繼續",
+                                       @"play", @"pause", @"resume" ]];
+    });
+    NSString *t = [text.lowercaseString stringByTrimmingCharactersInSet:
+                   [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return [exact containsObject:t];
+}
+
+static void IVCollectControls(UIView *root, UIView *skip, int depth,
+                              int *budget, NSMutableArray<UIControl *> *out) {
+    if (root == nil || depth > 40 || budget == NULL || *budget <= 0 || out.count >= 96) return;
     (*budget)--;
-    if (root == skip) return nil;                 // 我们自己的 overlay 绝不算
-    if (root.hidden || root.alpha < 0.05) return nil;
+    if (root == skip) return;                 // 我们自己的 overlay 绝不算
 
     if ([root isKindOfClass:[UIControl class]]) {
-        NSString *cls = NSStringFromClass([root class]);
-        NSString *low = cls.lowercaseString;
-        BOOL nameHit = [low containsString:@"playpause"] ||
-                       [low containsString:@"playbutton"] ||
-                       ([low containsString:@"play"] && ![low containsString:@"replay"]);
-        if (nameHit && root.window != nil &&
-            root.bounds.size.width > 1.0 && root.bounds.size.height > 1.0) {
-            UIControl *c = (UIControl *)root;
-            if (c.allTargets.count > 0) return c;
+        [out addObject:(UIControl *)root];
+    }
+    for (UIView *s in root.subviews) {
+        IVCollectControls(s, skip, depth + 1, budget, out);
+    }
+}
+
+/// 要搜的窗口：调用方给的、我们自己所在的，再加上 App 的所有窗口。
+/// 相册有时把我们挂在自己的窗口上，只搜 `win` 是搜不到原生那套 chrome 的。
+static NSArray<UIWindow *> *IVSearchWindows(UIWindow *win, UIView *skip) {
+    NSMutableArray<UIWindow *> *out = [NSMutableArray arrayWithCapacity:4];
+
+    if (win != nil) [out addObject:win];
+    UIWindow *own = skip.window;
+    if (own != nil && ![out containsObject:own]) [out addObject:own];
+
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (w != nil && ![out containsObject:w]) [out addObject:w];
+    }
+    return out;
+}
+
+/// 找宿主那个播放/暂停按钮。
+///
+/// 不再要求类名里带 `play`（相册的按钮类名不一定带），也不要求
+/// `allTargets` 非空（`addAction:forControlEvents:` 绑的按钮 `allTargets` 是空的，
+/// 但 `sendActionsForControlEvents:` 照样能触发）。判断依据只剩
+/// **无障碍文本是「播放」还是「暂停」**——这个骗不了人。
+static UIControl *IVFindPlayPauseControl(UIWindow *win, UIView *skip, BOOL wantPlay, int *thinksOut) {
+    NSMutableArray<UIControl *> *all = [NSMutableArray array];
+    int budget = 6000;
+    for (UIWindow *w in IVSearchWindows(win, skip)) {
+        if (budget <= 0 || all.count >= 96) break;
+        IVCollectControls(w, skip, 0, &budget, all);
+    }
+
+    UIControl *best = nil;
+    int bestScore = -1;
+    int bestThinks = -1;
+    NSMutableString *report = [NSMutableString string];
+
+    for (UIControl *c in all) {
+        NSString *text = IVAccessibilityText(c, 0);
+        int thinks = IVThinksPlayingFromText(text);
+        BOOL visible = (c.window != nil && !c.hidden && c.alpha > 0.05);
+
+        if (report.length < 900) {
+            [report appendFormat:@"\n      · %@  label=%@  thinks=%d  %@",
+                                   NSStringFromClass([c class]), text ?: @"—", thinks,
+                                   visible ? @"可见" : @"隐藏"];
+        }
+
+        if (thinks < 0) continue;
+        if (c.bounds.size.width < 8.0 || c.bounds.size.height < 8.0) continue;
+
+        NSString *low = NSStringFromClass([c class]).lowercaseString;
+        int score = 0;
+        if ((thinks == 1) != wantPlay) score += 8;          // 状态不一致的优先纠它
+        if (visible) score += 4;                            // 看得见的优先（隐藏的也能点，只是次选）
+        if (IVTextIsExactlyPlayPause(text)) score += 6;      // 「播放」/「暂停」这种最纯
+        if ([low containsString:@"play"]) score += 2;
+
+        if (score > bestScore) {
+            bestScore = score;
+            best = c;
+            bestThinks = thinks;
         }
     }
 
-    for (UIView *s in root.subviews) {
-        UIControl *r = IVFindPlayPauseControl(s, skip, depth + 1, budget);
-        if (r != nil) return r;
+    if (thinksOut != NULL) *thinksOut = bestThinks;
+
+    if (best == nil) {
+        static int dumps = 0;
+        if (dumps < 3) {                 // 日志别刷屏
+            dumps++;
+            IVLog(@"icon sync: 没找到播放/暂停按钮，扫了 %lu 个控件：%@",
+                  (unsigned long)all.count, report.length > 0 ? report : @"(空)");
+        }
     }
-    return nil;
-}
-
-/// 当前最该用的那个窗口。
-/// 不用 `keyWindow` —— 它在 iOS 13 就被标记废弃，多 scene 下还只返回全局随便一个，
-/// 编译期又会因为 `-Werror,-Wdeprecated-declarations` 直接失败。
-/// 这里遍历窗口，优先 key window，退而求其次取第一个可见且有根控制器的。
-static UIWindow *IVActiveWindow(void) {
-    UIApplication *app = [UIApplication sharedApplication];
-    if (app == nil) return nil;                 // 扩展进程里没有 UIApplication
-
-    UIWindow *fallback = nil;
-    for (UIWindow *w in app.windows) {
-        if (w.hidden) continue;
-        if (w.isKeyWindow) return w;
-        if (fallback == nil && w.rootViewController != nil) fallback = w;
-    }
-    return fallback;
-}
-
-BOOL IVHostSyncPlayPauseIcon(UIWindow *win, BOOL wantPlay, UIView *skip) {
-    UIWindow *target = win;
-    if (target == nil) {
-        target = skip.window;                   // 我们自己所在的窗口一定是对的
-    }
-    if (target == nil) {
-        target = IVActiveWindow();
-    }
-    if (target == nil) return NO;
-
-    int budget = 4000;
-    UIControl *c = IVFindPlayPauseControl(target, skip, 0, &budget);
-    if (c == nil) {
-        IVLog(@"icon sync: 没找到原生播放/暂停按钮");
-        return NO;
-    }
-
-    int thinks = IVControlThinksPlaying(c);
-    IVLog(@"icon sync: %@ label=%@ thinks=%d want=%d",
-          NSStringFromClass([c class]), IVAccessibilityText(c), thinks, wantPlay);
-
-    if (thinks < 0) return NO;                      // 判断不了就别乱点
-    if ((thinks == 1) == wantPlay) return YES;      // 图标已经是对的
-
-    // 真实播放状态此时已经是 wantPlay，它那一下只会把图标纠正过来
-    [c sendActionsForControlEvents:UIControlEventTouchUpInside];
-    IVLog(@"icon sync: 已点击 %@ 纠正图标", NSStringFromClass([c class]));
-    return YES;
+    return best;
 }
 
 #pragma mark - 对外
 
-BOOL IVHostSetPlaying(UIWindow *win, BOOL wantPlay, AVPlayer *player) {
+IVHostAction IVHostSetPlaying(UIWindow *win, BOOL wantPlay, AVPlayer *player, UIView *skip) {
     @try {
+        // ── 1. 点宿主自己的播放/暂停按钮 ──────────────────────────────
+        //    这是唯一「状态和图标必然一起变」的做法：跟用户手指点下去一样。
+        //    文件 / AVKit 也走这条，行为一致。
+        int thinks = -1;
+        UIControl *btn = IVFindPlayPauseControl(win, skip, wantPlay, &thinks);
+        if (btn != nil) {
+            IVLog(@"host bridge: 找到原生按钮 %@ label=%@ thinks=%d want=%d",
+                  NSStringFromClass([btn class]), IVAccessibilityText(btn, 0), thinks, wantPlay);
+
+            if ((thinks == 1) != wantPlay) {
+                [btn sendActionsForControlEvents:UIControlEventTouchUpInside];
+                IVLog(@"host bridge: 已点击原生按钮 -> %@", wantPlay ? @"play" : @"pause");
+                return IVHostActionButton;
+            }
+            // 图标已经和想要的一致：宿主状态本来就是对的，
+            // 直接返回 None 让上层去兜底处理 player 本身（多半是个空操作）。
+            IVLog(@"host bridge: 原生图标已经一致，不用点");
+            return IVHostActionNone;
+        }
+
+        // ── 2. 相册的状态机 ────────────────────────────────────────────
         NSArray<UIViewController *> *vcs = IVAllViewControllers(win);
 
-        // 排查用：把控制器链打出来，日志里能直接看到是哪个 App / 哪个版本的结构
         NSMutableString *chain = [NSMutableString string];
         for (UIViewController *vc in vcs) {
             if (chain.length > 400) { [chain appendString:@"…"]; break; }
@@ -286,7 +401,6 @@ BOOL IVHostSetPlaying(UIWindow *win, BOOL wantPlay, AVPlayer *player) {
         }
         IVLog(@"host bridge: 扫到 %lu 个控制器: %@", (unsigned long)vcs.count, chain);
 
-        // 1) 相册：交给 PUBrowsingVideoPlayer，原生那条栏才会跟着刷新
         for (UIViewController *vc in vcs) {
             id vp = IVBrowsingPlayerFrom(vc);
             if (vp == nil) continue;
@@ -296,12 +410,13 @@ BOOL IVHostSetPlaying(UIWindow *win, BOOL wantPlay, AVPlayer *player) {
                   IVCurrentDesiredPlayState(vp));
 
             if (IVApplyPlayState(vp, wantPlay)) {
-                IVLog(@"host bridge: %@ -> %@", NSStringFromClass([vc class]), wantPlay ? @"play" : @"pause");
-                return YES;
+                IVLog(@"host bridge: %@ -> %@", NSStringFromClass([vc class]),
+                      wantPlay ? @"play" : @"pause");
+                return IVHostActionStateMachine;
             }
         }
 
-        // 2) 文件 / QuickLook：多半是 AVKit 的播放控制器，它自己有 play / pause
+        // ── 3. AVKit 的播放控制器 ──────────────────────────────────────
         NSString *selName = wantPlay ? @"play" : @"pause";
         for (UIViewController *vc in vcs) {
             NSString *cls = NSStringFromClass([vc class]);
@@ -314,15 +429,15 @@ BOOL IVHostSetPlaying(UIWindow *win, BOOL wantPlay, AVPlayer *player) {
 
             ((void (*)(id, SEL))objc_msgSend)(vc, NSSelectorFromString(selName));
             IVLog(@"host bridge: %@ -> %@", cls, selName);
-            return YES;
+            return IVHostActionAVKit;
         }
     } @catch (__unused NSException *e) {
         IVLog(@"host bridge 异常：%@", e.reason);
-        return NO;
+        return IVHostActionNone;
     }
 
     IVLog(@"host bridge: 没找到宿主，退回直接操作 player");
-    return NO;
+    return IVHostActionNone;
 }
 
 BOOL IVHostSetMuted(UIWindow *win, BOOL muted) {

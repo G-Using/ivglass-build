@@ -59,6 +59,8 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 }
 /// 播放 / 暂停：优先交给宿主状态机，保证原生那条控制栏跟着变
 - (void)setPlayingViaHost:(BOOL)wantPlay;
+/// 播/暂停之后的自查，attempt 只是防死循环
+- (void)verifyPlayState:(BOOL)wantPlay attempt:(int)attempt;
 @end
 
 @implementation IVGlassOverlay
@@ -615,39 +617,63 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 /// 直接 `[player pause]` 的问题是：画面停住了，但相册自己的状态机
 /// （`PUBrowsingVideoPlayer.desiredPlayState`）还认为在播，
 /// 底部那条原生控制栏就不会把图标切成「播放」—— 用户看到的就是
-/// 「插件暂停了，原生不跟随」。所以先请求宿主，宿主不理我们才自己动手。
+/// 「插件暂停了，原生不跟随」。
+///
+/// 现在优先**点原生那个播放/暂停按钮**：效果和用户手指点下去完全一样，
+/// 宿主状态和图标一起变，不存在"两边不一致"的中间态。
+/// 找不到按钮才退回状态机 / 直接操作 player。
 - (void)setPlayingViaHost:(BOOL)wantPlay {
     AVPlayer *p = self.player;
     if (!p) return;
 
     UIWindow *win = _boundWindow ?: self.window;
-    BOOL viaHost = IVHostSetPlaying(win, wantPlay, p);
+    IVHostAction action = IVHostSetPlaying(win, wantPlay, p, self);
 
-    if (!viaHost) {
+    if (action == IVHostActionNone) {
         if (wantPlay) [p play]; else [p pause];
     }
 
-    // 0.32s 后做两件事：
-    //   1. 实际播放状态没变成想要的样子 —— 补一刀直接操作 player
-    //   2. 不管状态成没成，都去把原生那条栏的图标纠过来
-    //      （相册的图标不一定跟着 desiredPlayState 走，实测就是不跟）
+    // 0.35s 后自查：状态没变成想要的样子就补一刀。
+    // 不看 isPlaying（播到结尾时 rate 也是 0，会被误判），直接看 rate。
     __weak typeof(self) ws = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.32 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         __strong typeof(ws) s = ws;
         if (s == nil) return;
-
-        AVPlayer *pp = s.player;
-        if (pp == nil) return;
-
-        if ([s isPlaying] != wantPlay) {
-            IVLog(@"宿主没执行（want=%d），直接操作 player", wantPlay);
-            if (wantPlay) [pp play]; else [pp pause];
-        }
-
-        IVHostSyncPlayPauseIcon(s->_boundWindow ?: s.window, wantPlay, s);
-        [s updatePlayState];
+        if (s.player == nil) return;
+        [s verifyPlayState:wantPlay attempt:0];
     });
+}
+
+- (void)verifyPlayState:(BOOL)wantPlay attempt:(int)attempt {
+    AVPlayer *p = self.player;
+    if (p == nil) return;
+
+    if ((p.rate > 0.0) == wantPlay) {
+        [self updatePlayState];
+        return;
+    }
+
+    // 第一次没成，再找一次宿主：
+    // 相册的原生控制栏是自动隐藏的，藏起来的时候按钮可能整棵子树被移走，
+    // 0.35 秒后它常常又回来了，这会儿再点就点得到。
+    if (attempt == 0) {
+        IVHostAction again = IVHostSetPlaying(_boundWindow ?: self.window, wantPlay, p, self);
+        if (again != IVHostActionNone) {
+            IVLog(@"宿主第一次没生效，换 %ld 再来一次", (long)again);
+            __weak typeof(self) ws = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.30 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                __strong typeof(ws) s = ws;
+                if (s != nil) [s verifyPlayState:wantPlay attempt:1];
+            });
+            return;
+        }
+    }
+
+    IVLog(@"宿主没执行（want=%d attempt=%d），直接操作 player", wantPlay, attempt);
+    if (wantPlay) [p play]; else [p pause];
+    [self updatePlayState];
 }
 
 - (void)onPlayPause {

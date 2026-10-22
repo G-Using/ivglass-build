@@ -10,6 +10,18 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// 这次播放/暂停是怎么完成的，调用方据此决定要不要兜底。
+typedef NS_ENUM(NSInteger, IVHostAction) {
+    /// 什么都没找到 —— 调用方自己去操作 player
+    IVHostActionNone = 0,
+    /// 点了宿主自己的播放/暂停按钮（最可靠，图标和状态一起变）
+    IVHostActionButton = 1,
+    /// 写了 PUBrowsingVideoPlayer 的状态机（相册）
+    IVHostActionStateMachine = 2,
+    /// 调了 AVPlayerViewController 的 play / pause（文件 / AVKit）
+    IVHostActionAVKit = 3,
+};
+
 /// 请求宿主（相册 / 文件 / AVKit）播放或暂停。
 ///
 /// 为什么不能直接 `[player pause]`：
@@ -18,20 +30,19 @@ NS_ASSUME_NONNULL_BEGIN
 /// 但宿主不知道，底部那条栏的播放/暂停图标不会跟着变 —— 看起来就是
 /// 「插件暂停了，原生不跟随」，再点原生按钮还会把状态搞反。
 ///
-/// @return YES 表示已经交给宿主；NO 表示没找到宿主，调用方应自行操作 player。
-BOOL IVHostSetPlaying(UIWindow * _Nullable win, BOOL wantPlay, AVPlayer * _Nullable player);
+/// 尝试顺序（前一个成了就不做后面的，避免重复 toggle）：
+///   1. 点宿主自己的播放/暂停按钮 —— 和用户手动点完全一样，状态和图标必然一致
+///   2. 写 `PUBrowsingVideoPlayer.desiredPlayState`
+///   3. 调 `AVPlayerViewController` 的 `play` / `pause`
+///
+/// @param skip 我们自己的 overlay，绝不能被当成原生按钮点
+/// @return 实际生效的方式；`IVHostActionNone` 表示没找到宿主
+IVHostAction IVHostSetPlaying(UIWindow * _Nullable win,
+                              BOOL wantPlay,
+                              AVPlayer * _Nullable player,
+                              UIView * _Nullable skip);
 
 /// 同上，静音。原生那条栏的音量图标也归宿主管。
 BOOL IVHostSetMuted(UIWindow * _Nullable win, BOOL muted);
-
-/// 让原生控制栏的播放/暂停图标跟上 wantPlay。
-///
-/// 相册那条栏的图标不一定跟着 `desiredPlayState` 走（实测就不跟），
-/// 所以最后补一刀：找到那个原生播放/暂停按钮，读它的无障碍标签判断它
-/// 以为自己在播还是暂停，不一致就 `sendActionsForControlEvents:` 点它一下。
-/// 此时真实播放状态已经是 wantPlay，它那一下只会把图标纠正过来，不会改状态。
-///
-/// @return YES 表示找到了按钮并处理了（或本来就一致）。
-BOOL IVHostSyncPlayPauseIcon(UIWindow * _Nullable win, BOOL wantPlay, UIView * _Nullable skip);
 
 NS_ASSUME_NONNULL_END
