@@ -2,15 +2,27 @@
 //  IVGlassKit.h
 //  IVGlassPlayer — iOS 26 风格玻璃播放控制
 //
-//  iOS 16 没有 UIGlassEffect，这里用「超薄毛玻璃 + 内高光渐变 + 细描边」
-//  模拟 Liquid Glass 的观感。
+//  iOS 16 没有 UIGlassEffect，这里用「毛玻璃 + 曲面渐变 + 球面高光 + 渐变边缘光」
+//  四层叠出 Liquid Glass 的观感。
 //
 
 #import <UIKit/UIKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface IVGlassView : UIVisualEffectView
+/// 仿 iOS 26 Liquid Glass 的玻璃容器。
+///
+/// 四层结构（从下往上）：
+///   1. UIVisualEffectView 毛玻璃垫底
+///   2. 白色薄雾 + 纵向曲面渐变 —— 顶部亮、底部压暗，做出「有厚度」的体积感
+///   3. 顶部球面高光（radial）—— 模拟光源打在弧面上的反射
+///   4. 1px 渐变描边 —— 左上最亮、中间转弱、右下再亮一次，模拟玻璃折射的边缘光
+///
+/// 阴影挂在容器自身的 layer 上（内部 blur 单独裁剪），这样圆角不会把阴影一起裁掉。
+@interface IVGlassView : UIView
+
+/// 内容层：按钮、文字等加到这里（等价于 UIVisualEffectView.contentView）
+@property (nonatomic, readonly) UIView *contentView;
 
 /// radius 传 0 时按正方形自动取半径（供圆形按钮用）
 - (instancetype)initWithRadius:(CGFloat)radius;

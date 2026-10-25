@@ -2,15 +2,17 @@
 #import "IVGlassKit.h"
 #import "IVHostBridge.h"
 #import <QuartzCore/QuartzCore.h>
+#import <objc/runtime.h>
 #import <math.h>
 
 #pragma mark - 尺寸常量
 
-static const CGFloat kPillHCompact  = 46.0;   // 常态胶囊高度
-static const CGFloat kPillHExpanded = 74.0;   // 展开后高度
-static const CGFloat kPillSide      = 12.0;   // 左右距屏幕边缘
+static const CGFloat kPillHCompact  = 56.0;   // 常态胶囊高度（iOS 26 的底栏更饱满）
+static const CGFloat kPillHExpanded = 86.0;   // 展开后高度
+static const CGFloat kPillSide      = 16.0;   // 左右距屏幕边缘
 static const CGFloat kPillMaxWidth  = 560.0;  // 横屏时不要拉满
-static const CGFloat kCompactButton = 30.0;   // 胶囊里的播放 / 静音小圆钮
+static const CGFloat kPillPad       = 13.0;   // 胶囊内边距
+static const CGFloat kCompactButton = 36.0;   // 胶囊里的播放 / 静音小圆钮
 static const CGFloat kTickInterval  = 0.08;
 
 /// 浅玻璃上的墨色（音量 HUD 的图标就是这种深灰）
@@ -61,7 +63,12 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
 - (void)setPlayingViaHost:(BOOL)wantPlay;
 /// 播/暂停之后的自查，attempt 只是防死循环
 - (void)verifyPlayState:(BOOL)wantPlay attempt:(int)attempt action:(IVHostAction)action;
+/// 按下缩一点、松手弹回来 —— 玻璃被手指压下去的反馈
+- (void)attachPressFeedback:(UIButton *)button host:(UIView *)host;
 @end
+
+/// 按钮 -> 要缩放的玻璃容器
+static const void *kIVPressHostKey = &kIVPressHostKey;
 
 @implementation IVGlassOverlay
 
@@ -85,7 +92,7 @@ static inline UIColor *IVFillTint(void) { return [UIColor colorWithWhite:0.10 al
     _videoRect = CGRectZero;
     _lastTapTime = 0.0;
 
-    IVLog(@"=== IVGlassPlayer 0.6.5 overlay init ===");
+    IVLog(@"=== IVGlassPlayer 0.8.0 overlay init ===");
 
     return self;
 }
@@ -284,7 +291,8 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     // 进度槽
     _track = [[UIView alloc] initWithFrame:CGRectZero];
     _track.backgroundColor = IVTrackTint();
-    _track.layer.cornerRadius = 2.0;
+    _track.layer.cornerCurve = kCACornerCurveContinuous;
+    _track.layer.cornerRadius = 2.5;
     _track.clipsToBounds = NO;
     _track.userInteractionEnabled = NO;
     [_pill.contentView addSubview:_track];
@@ -292,7 +300,8 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     // 进度填充
     _fill = [[UIView alloc] initWithFrame:CGRectZero];
     _fill.backgroundColor = IVFillTint();
-    _fill.layer.cornerRadius = 2.0;
+    _fill.layer.cornerCurve = kCACornerCurveContinuous;
+    _fill.layer.cornerRadius = 2.5;
     _fill.userInteractionEnabled = NO;
     [_track addSubview:_fill];
 
@@ -388,6 +397,49 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     _fwdBtn.tintColor = IVInk();
     [_fwdBtn addTarget:self action:@selector(onForward) forControlEvents:UIControlEventTouchUpInside];
     [_fwdCircle.contentView addSubview:_fwdBtn];
+
+    [self attachPressFeedback:_backBtn host:_backCircle];
+    [self attachPressFeedback:_playBig host:_playCircle];
+    [self attachPressFeedback:_fwdBtn host:_fwdCircle];
+}
+
+#pragma mark - 按压反馈
+
+- (void)attachPressFeedback:(UIButton *)button host:(UIView *)host {
+    if (button == nil || host == nil) return;
+    objc_setAssociatedObject(button, kIVPressHostKey, host, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [button addTarget:self action:@selector(onGlassPressDown:)
+     forControlEvents:UIControlEventTouchDown];
+    [button addTarget:self action:@selector(onGlassPressUp:)
+     forControlEvents:(UIControlEventTouchUpInside |
+                      UIControlEventTouchUpOutside |
+                      UIControlEventTouchCancel)];
+}
+
+- (void)onGlassPressDown:(UIButton *)button {
+    UIView *host = objc_getAssociatedObject(button, kIVPressHostKey);
+    if (host == nil) return;
+    [UIView animateWithDuration:0.14
+                          delay:0.0
+                        options:(UIViewAnimationOptionBeginFromCurrentState |
+                                 UIViewAnimationOptionAllowUserInteraction)
+                     animations:^{
+        host.transform = CGAffineTransformMakeScale(0.94, 0.94);
+    } completion:nil];
+}
+
+- (void)onGlassPressUp:(UIButton *)button {
+    UIView *host = objc_getAssociatedObject(button, kIVPressHostKey);
+    if (host == nil) return;
+    [UIView animateWithDuration:0.36
+                          delay:0.0
+         usingSpringWithDamping:0.58
+          initialSpringVelocity:0.7
+                        options:(UIViewAnimationOptionBeginFromCurrentState |
+                                 UIViewAnimationOptionAllowUserInteraction)
+                     animations:^{
+        host.transform = CGAffineTransformIdentity;
+    } completion:nil];
 }
 
 #pragma mark - 布局
@@ -432,7 +484,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     _pill.frame = CGRectMake(pillX, pillY, pillW, pillH);
     [_pill updateCornerRadius:pillH / 2.0];
 
-    CGFloat trackH = _expanded ? 8.0 : 4.0;
+    CGFloat trackH = _expanded ? 9.0 : 4.5;
     CGFloat trackY = (pillH - trackH) / 2.0;
     CGFloat trackR = trackH / 2.0;
 
@@ -443,15 +495,15 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
         _lblRight.hidden = NO;
         _knob.hidden = NO;
 
-        _lblLeft.font  = [UIFont monospacedDigitSystemFontOfSize:15.0 weight:UIFontWeightSemibold];
-        _lblRight.font = [UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightMedium];
+        _lblLeft.font  = [UIFont monospacedDigitSystemFontOfSize:16.0 weight:UIFontWeightSemibold];
+        _lblRight.font = [UIFont monospacedDigitSystemFontOfSize:14.0 weight:UIFontWeightMedium];
 
-        CGFloat pad  = 22.0;
-        CGFloat lblW = 78.0;
+        CGFloat pad  = 24.0;
+        CGFloat lblW = 82.0;
         _lblLeft.frame  = CGRectMake(pad, 0.0, lblW, pillH);
         _lblRight.frame = CGRectMake(pillW - pad - lblW, 0.0, lblW, pillH);
 
-        CGFloat tx = pad + lblW + 10.0;
+        CGFloat tx = pad + lblW + 12.0;
         CGFloat tw = pillW - tx * 2.0;
         _track.frame = CGRectMake(tx, trackY, tw, trackH);
     } else {
@@ -463,11 +515,12 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
         CGFloat b = kCompactButton;
         CGFloat by = (pillH - b) / 2.0;
-        _playBtn.frame = CGRectMake(8.0, by, b, b);
-        _muteBtn.frame = CGRectMake(pillW - 8.0 - b, by, b, b);
+        _playBtn.frame = CGRectMake(kPillPad, by, b, b);
+        _muteBtn.frame = CGRectMake(pillW - kPillPad - b, by, b, b);
 
-        CGFloat tx = 8.0 + b + 11.0;
-        CGFloat tw = pillW - tx - 11.0 - b - 8.0;
+        // 进度槽左右对称收在同一条内边距上，跟 iOS 26 底栏一样居中
+        CGFloat tx = kPillPad + b + kPillPad;
+        CGFloat tw = pillW - tx * 2.0;
         _track.frame = CGRectMake(tx, trackY, tw, trackH);
     }
 
@@ -475,20 +528,20 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     _fill.layer.cornerRadius = trackR;
 
     // 小圆钮图标
-    CGFloat iconPt = 17.0;
-    [_playBtn setImage:IVSymbol([self isPlaying] ? @"pause.fill" : @"play.fill", iconPt, UIFontWeightBold)
+    CGFloat iconPt = 18.0;
+    [_playBtn setImage:IVSymbol([self isPlaying] ? @"pause.fill" : @"play.fill", iconPt, UIFontWeightSemibold)
               forState:UIControlStateNormal];
     [_muteBtn setImage:IVSymbol([self isMuted] ? @"speaker.slash.fill" : @"speaker.wave.2.fill",
-                                iconPt - 1.0, UIFontWeightSemibold)
+                                iconPt - 1.0, UIFontWeightMedium)
               forState:UIControlStateNormal];
 
     [self applyProgressValue];
 }
 
 - (void)layoutCenterWithWidth:(CGFloat)W area:(CGRect)area {
-    CGFloat sideD = 68.0;
-    CGFloat midD  = 84.0;
-    CGFloat gap   = 26.0;
+    CGFloat sideD = 66.0;
+    CGFloat midD  = 82.0;
+    CGFloat gap   = 27.0;
 
     CGFloat scale = MIN(1.0, MIN(W, self.bounds.size.height) / 400.0);
     scale = MAX(0.62, scale);
@@ -505,6 +558,10 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     // 排版前先把 transform 复位：带着非单位 transform 去设 frame，
     // UIKit 会按 frame/transform 反算 center，位置就会漂。
     _centerWrap.transform = CGAffineTransformIdentity;
+    // 按压反馈会给圆形按钮挂缩放 transform，同样要复位
+    _backCircle.transform = CGAffineTransformIdentity;
+    _playCircle.transform = CGAffineTransformIdentity;
+    _fwdCircle.transform = CGAffineTransformIdentity;
     _centerWrap.frame = CGRectMake(originX - gap * 0.4,
                                    midY - midD / 2.0 - gap * 0.4,
                                    totalW + gap * 0.8,
@@ -522,14 +579,14 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     _playBig.frame  = CGRectMake(0.0, 0.0, midD, midD);
     _fwdBtn.frame   = CGRectMake(0.0, 0.0, sideD, sideD);
 
-    CGFloat sideIcon = 26.0 * scale;
-    CGFloat midIcon  = 32.0 * scale;
+    CGFloat sideIcon = 27.0 * scale;
+    CGFloat midIcon  = 33.0 * scale;
 
-    [_backBtn setImage:IVSymbol(@"gobackward.15", sideIcon, UIFontWeightSemibold)
+    [_backBtn setImage:IVSymbol(@"gobackward.15", sideIcon, UIFontWeightMedium)
               forState:UIControlStateNormal];
-    [_fwdBtn setImage:IVSymbol(@"goforward.15", sideIcon, UIFontWeightSemibold)
+    [_fwdBtn setImage:IVSymbol(@"goforward.15", sideIcon, UIFontWeightMedium)
              forState:UIControlStateNormal];
-    [_playBig setImage:IVSymbol([self isPlaying] ? @"pause.fill" : @"play.fill", midIcon, UIFontWeightBold)
+    [_playBig setImage:IVSymbol([self isPlaying] ? @"pause.fill" : @"play.fill", midIcon, UIFontWeightSemibold)
               forState:UIControlStateNormal];
 }
 
@@ -549,7 +606,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     _fill.frame = CGRectMake(0.0, 0.0, MAX(0.0, fillW), trackH);
 
     if (_expanded) {
-        CGFloat knobD = 16.0;
+        CGFloat knobD = 18.0;
         // _knob 挂在胶囊 contentView 上，x 要加上进度槽自身的偏移
         CGFloat cx = _track.frame.origin.x + fillW;
         CGFloat cy = _track.frame.origin.y + trackH / 2.0;
@@ -595,18 +652,18 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
 - (void)updatePlayState {
     UIImage *small = IVSymbol([self isPlaying] ? @"pause.fill" : @"play.fill",
-                              17.0, UIFontWeightBold);
+                              18.0, UIFontWeightSemibold);
     [_playBtn setImage:small forState:UIControlStateNormal];
 
-    CGFloat midIcon = 32.0 * MAX(0.62, MIN(1.0, MIN(self.bounds.size.width, self.bounds.size.height) / 400.0));
+    CGFloat midIcon = 33.0 * MAX(0.62, MIN(1.0, MIN(self.bounds.size.width, self.bounds.size.height) / 400.0));
     UIImage *big = IVSymbol([self isPlaying] ? @"pause.fill" : @"play.fill",
-                            midIcon, UIFontWeightBold);
+                            midIcon, UIFontWeightSemibold);
     [_playBig setImage:big forState:UIControlStateNormal];
 }
 
 - (void)updateMuteState {
     UIImage *img = IVSymbol([self isMuted] ? @"speaker.slash.fill" : @"speaker.wave.2.fill",
-                            16.0, UIFontWeightSemibold);
+                            17.0, UIFontWeightMedium);
     [_muteBtn setImage:img forState:UIControlStateNormal];
 }
 

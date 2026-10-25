@@ -3,68 +3,149 @@
 #import <math.h>
 #import <objc/runtime.h>
 
-@implementation IVGlassView {
-    CAGradientLayer *_sheen;
-    UIView          *_tint;
+/// 边缘光的线宽：略粗于 1 物理像素，抗锯齿之后才像一条「折射亮边」
+static inline CGFloat IVHairline(void) {
+    CGFloat s = [UIScreen mainScreen].scale;
+    if (!(s > 0.0)) s = 3.0;
+    return 1.6 / s;
 }
 
+@implementation IVGlassView {
+    UIVisualEffectView *_blur;
+    UIView             *_contentView;
+    UIView             *_tint;
+    CAGradientLayer    *_sheen;    // 纵向曲面渐变
+    CAGradientLayer    *_spec;     // 顶部球面高光
+    CAGradientLayer    *_rim;      // 边缘光
+    CAShapeLayer       *_rimMask;
+    CGFloat             _radius;
+}
+
+@synthesize contentView = _contentView;
+
 - (instancetype)initWithRadius:(CGFloat)radius {
-    // 音量 HUD 同款材质：跟随明暗模式，浅色环境下呈浅灰白玻璃
-    UIBlurEffect *effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterial];
-    self = [super initWithEffect:effect];
+    self = [super initWithFrame:CGRectZero];
     if (!self) return nil;
 
+    _radius = radius;
+
+    self.backgroundColor = [UIColor clearColor];
+    // 不裁剪自己：圆角交给内部 blur 裁，阴影才能留在外面
     self.layer.cornerCurve = kCACornerCurveContinuous;
-    self.layer.cornerRadius = radius;
-    self.clipsToBounds = YES;
+    self.layer.shadowColor = [UIColor colorWithWhite:0.0 alpha:0.32].CGColor;
+    self.layer.shadowOpacity = 1.0;
+    self.layer.shadowRadius = 18.0;
+    self.layer.shadowOffset = CGSizeMake(0.0, 8.0);
 
-    // 玻璃边缘：细白描边
-    self.layer.borderWidth = 0.7;
-    self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.55].CGColor;
+    // 1) 毛玻璃底 —— 音量 HUD 同款材质，跟随明暗模式
+    UIBlurEffect *effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterial];
+    _blur = [[UIVisualEffectView alloc] initWithEffect:effect];
+    _blur.userInteractionEnabled = NO;
+    _blur.clipsToBounds = YES;
+    _blur.layer.cornerCurve = kCACornerCurveContinuous;
+    _blur.layer.cornerRadius = radius;
+    [self addSubview:_blur];
 
-    // 白色提亮层，贴近音量条的浅玻璃观感
+    // 2) 白色薄雾 + 曲面渐变（挂在 blur.contentView 上，自动被圆角裁掉）
     _tint = [[UIView alloc] initWithFrame:CGRectZero];
-    _tint.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.30];
+    _tint.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
     _tint.userInteractionEnabled = NO;
-    [_tint.layer removeFromSuperlayer];
-    [self.contentView addSubview:_tint];
+    [_blur.contentView addSubview:_tint];
 
-    // 顶部高光 + 底部压暗，让平面色块产生「曲面玻璃」的体积感
     _sheen = [CAGradientLayer layer];
     _sheen.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:0.35].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.08].CGColor,
-        (id)[UIColor colorWithWhite:0.0 alpha:0.06].CGColor
+        (id)[UIColor colorWithWhite:1.0 alpha:0.34].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.04].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.12].CGColor
     ];
-    _sheen.locations = @[@0.0, @0.52, @1.0];
+    _sheen.locations = @[@0.0, @0.55, @1.0];
     _sheen.startPoint = CGPointMake(0.5, 0.0);
     _sheen.endPoint = CGPointMake(0.5, 1.0);
-    [self.contentView.layer addSublayer:_sheen];
+    [_blur.contentView.layer addSublayer:_sheen];
+
+    // 3) 顶部球面高光：radial，圆心压在顶边中点
+    _spec = [CAGradientLayer layer];
+    _spec.type = kCAGradientLayerRadial;
+    _spec.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:0.30].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.09].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor
+    ];
+    _spec.locations = @[@0.0, @0.42, @1.0];
+    // radial 的两个半径由 start→end 的位移决定：横向拉满、纵向往下延伸，
+    // 得到一个压在顶边的宽椭圆高光（dx 若为 0 会退化成一条线）
+    _spec.startPoint = CGPointMake(0.5, 0.0);
+    _spec.endPoint = CGPointMake(1.0, 1.0);
+    [_blur.contentView.layer addSublayer:_spec];
+
+    // 4) 边缘光：左上最亮 → 中间弱 → 右下再亮一次
+    _rim = [CAGradientLayer layer];
+    _rim.colors = @[
+        (id)[UIColor colorWithWhite:1.0 alpha:0.88].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.16].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.60].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.10].CGColor
+    ];
+    _rim.locations = @[@0.0, @0.34, @0.62, @1.0];
+    _rim.startPoint = CGPointMake(0.0, 0.0);
+    _rim.endPoint = CGPointMake(1.0, 1.0);
+
+    _rimMask = [CAShapeLayer layer];
+    _rimMask.fillColor = [UIColor clearColor].CGColor;
+    _rimMask.strokeColor = [UIColor blackColor].CGColor;
+    _rimMask.lineWidth = IVHairline();
+    _rim.mask = _rimMask;
+    [self.layer addSublayer:_rim];
+
+    // 5) 交互内容层：放在描边之上，图标不会被边缘光盖住
+    _contentView = [[UIView alloc] initWithFrame:CGRectZero];
+    _contentView.backgroundColor = [UIColor clearColor];
+    [self addSubview:_contentView];
 
     return self;
 }
 
 - (void)updateCornerRadius:(CGFloat)radius {
-    self.layer.cornerRadius = radius;
+    _radius = radius;
+    [self setNeedsLayout];
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
 
+    CGRect b = self.bounds;
+    if (b.size.width < 1.0 || b.size.height < 1.0) return;
+
+    // 圆形按钮：半径直接取一半，不依赖外面传的值
+    CGFloat r = _radius;
+    if (fabs(b.size.width - b.size.height) < 1.0) {
+        r = b.size.width / 2.0;
+    }
+    CGFloat maxR = MIN(b.size.width, b.size.height) / 2.0;
+    if (r > maxR) r = maxR;
+
+    CGFloat lw = IVHairline();
+
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    _tint.frame = self.bounds;
-    _sheen.frame = self.bounds;
-    [CATransaction commit];
 
-    // 圆形按钮：半径跟高度走，避免布局后圆角还是旧值
-    if (fabs(self.bounds.size.width - self.bounds.size.height) < 1.0 &&
-        self.bounds.size.width > 1.0) {
-        CGFloat r = self.bounds.size.width / 2.0;
-        if (fabs(self.layer.cornerRadius - r) > 0.5) {
-            self.layer.cornerRadius = r;
-        }
-    }
+    _blur.frame = b;
+    _tint.frame = b;
+    _sheen.frame = b;
+    _spec.frame = b;
+    _rim.frame = b;
+    _contentView.frame = b;
+
+    _blur.layer.cornerRadius = r;
+    self.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:b cornerRadius:r].CGPath;
+
+    _rimMask.lineWidth = lw;
+    UIBezierPath *ring =
+        [UIBezierPath bezierPathWithRoundedRect:CGRectInset(b, lw / 2.0, lw / 2.0)
+                                   cornerRadius:MAX(0.0, r - lw / 2.0)];
+    _rimMask.path = ring.CGPath;
+
+    [CATransaction commit];
 }
 
 @end
