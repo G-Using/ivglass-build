@@ -11,6 +11,9 @@ static const CGFloat kPillHCompact  = 56.0;   // 常态胶囊高度（iOS 26 的
 static const CGFloat kPillHExpanded = 86.0;   // 展开后高度
 static const CGFloat kPillSide      = 16.0;   // 左右距屏幕边缘
 static const CGFloat kPillMaxWidth  = 560.0;  // 横屏时不要拉满
+static const CGFloat kPillWCompact  = 0.50;   // 常态胶囊只占整条的一半
+static const CGFloat kPillWMin      = 200.0;  // 再窄放不下时间轴
+static const CGFloat kPillWExpanded = 360.0;  // 拖动时放宽，给时间轴留长度
 static const CGFloat kPillPad       = 13.0;   // 胶囊内边距
 static const CGFloat kCompactButton = 36.0;   // 胶囊里的播放 / 静音小圆钮
 static const CGFloat kTickInterval  = 0.08;
@@ -92,7 +95,7 @@ static const void *kIVPressHostKey = &kIVPressHostKey;
     _videoRect = CGRectZero;
     _lastTapTime = 0.0;
 
-    IVLog(@"=== IVGlassPlayer 0.8.0 overlay init ===");
+    IVLog(@"=== IVGlassPlayer 0.8.1 overlay init ===");
 
     return self;
 }
@@ -471,7 +474,12 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 
 - (void)layoutPillWithWidth:(CGFloat)W height:(CGFloat)H safeBottom:(CGFloat)safeBottom {
     CGFloat pillH = _expanded ? kPillHExpanded : kPillHCompact;
-    CGFloat pillW = MIN(W - kPillSide * 2.0, kPillMaxWidth);
+    CGFloat fullW = MIN(W - kPillSide * 2.0, kPillMaxWidth);
+    // 常态只占整条的一半 —— 之前一条横贯屏幕，压在画面上太抢眼；
+    // 展开拖动时放宽，时间轴需要长度，否则一拖就滑到头
+    CGFloat pillW = _expanded ? MIN(fullW, kPillWExpanded)
+                              : MAX(kPillWMin, fullW * kPillWCompact);
+    if (pillW > fullW) pillW = fullW;
     CGFloat pillX = (W - pillW) / 2.0;
     // 抬到相册底部那排缩略图条（可滑动选择的那排）上方，不压原生操作栏。
     // 126 还是偏高，按截图红框位置再往下 22pt。
@@ -495,15 +503,15 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
         _lblRight.hidden = NO;
         _knob.hidden = NO;
 
-        _lblLeft.font  = [UIFont monospacedDigitSystemFontOfSize:16.0 weight:UIFontWeightSemibold];
-        _lblRight.font = [UIFont monospacedDigitSystemFontOfSize:14.0 weight:UIFontWeightMedium];
+        _lblLeft.font  = [UIFont monospacedDigitSystemFontOfSize:15.0 weight:UIFontWeightSemibold];
+        _lblRight.font = [UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightMedium];
 
-        CGFloat pad  = 24.0;
-        CGFloat lblW = 82.0;
+        CGFloat pad  = 18.0;
+        CGFloat lblW = 66.0;
         _lblLeft.frame  = CGRectMake(pad, 0.0, lblW, pillH);
         _lblRight.frame = CGRectMake(pillW - pad - lblW, 0.0, lblW, pillH);
 
-        CGFloat tx = pad + lblW + 12.0;
+        CGFloat tx = pad + lblW + 10.0;
         CGFloat tw = pillW - tx * 2.0;
         _track.frame = CGRectMake(tx, trackY, tw, trackH);
     } else {
@@ -539,9 +547,9 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
 }
 
 - (void)layoutCenterWithWidth:(CGFloat)W area:(CGRect)area {
-    CGFloat sideD = 66.0;
-    CGFloat midD  = 82.0;
-    CGFloat gap   = 27.0;
+    CGFloat sideD = 56.0;
+    CGFloat midD  = 68.0;
+    CGFloat gap   = 22.0;
 
     CGFloat scale = MIN(1.0, MIN(W, self.bounds.size.height) / 400.0);
     scale = MAX(0.62, scale);
@@ -579,8 +587,8 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     _playBig.frame  = CGRectMake(0.0, 0.0, midD, midD);
     _fwdBtn.frame   = CGRectMake(0.0, 0.0, sideD, sideD);
 
-    CGFloat sideIcon = 27.0 * scale;
-    CGFloat midIcon  = 33.0 * scale;
+    CGFloat sideIcon = 23.0 * scale;
+    CGFloat midIcon  = 28.0 * scale;
 
     [_backBtn setImage:IVSymbol(@"gobackward.15", sideIcon, UIFontWeightMedium)
               forState:UIControlStateNormal];
@@ -606,7 +614,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
     _fill.frame = CGRectMake(0.0, 0.0, MAX(0.0, fillW), trackH);
 
     if (_expanded) {
-        CGFloat knobD = 18.0;
+        CGFloat knobD = 16.0;
         // _knob 挂在胶囊 contentView 上，x 要加上进度槽自身的偏移
         CGFloat cx = _track.frame.origin.x + fillW;
         CGFloat cy = _track.frame.origin.y + trackH / 2.0;
@@ -655,7 +663,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherG
                               18.0, UIFontWeightSemibold);
     [_playBtn setImage:small forState:UIControlStateNormal];
 
-    CGFloat midIcon = 33.0 * MAX(0.62, MIN(1.0, MIN(self.bounds.size.width, self.bounds.size.height) / 400.0));
+    CGFloat midIcon = 28.0 * MAX(0.62, MIN(1.0, MIN(self.bounds.size.width, self.bounds.size.height) / 400.0));
     UIImage *big = IVSymbol([self isPlaying] ? @"pause.fill" : @"play.fill",
                             midIcon, UIFontWeightSemibold);
     [_playBig setImage:big forState:UIControlStateNormal];

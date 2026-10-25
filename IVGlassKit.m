@@ -7,7 +7,7 @@
 static inline CGFloat IVHairline(void) {
     CGFloat s = [UIScreen mainScreen].scale;
     if (!(s > 0.0)) s = 3.0;
-    return 1.6 / s;
+    return 2.0 / s;
 }
 
 @implementation IVGlassView {
@@ -32,10 +32,10 @@ static inline CGFloat IVHairline(void) {
     self.backgroundColor = [UIColor clearColor];
     // 不裁剪自己：圆角交给内部 blur 裁，阴影才能留在外面
     self.layer.cornerCurve = kCACornerCurveContinuous;
-    self.layer.shadowColor = [UIColor colorWithWhite:0.0 alpha:0.32].CGColor;
+    self.layer.shadowColor = [UIColor colorWithWhite:0.0 alpha:0.34].CGColor;
     self.layer.shadowOpacity = 1.0;
-    self.layer.shadowRadius = 18.0;
-    self.layer.shadowOffset = CGSizeMake(0.0, 8.0);
+    self.layer.shadowRadius = 22.0;
+    self.layer.shadowOffset = CGSizeMake(0.0, 10.0);
 
     // 1) 毛玻璃底 —— 音量 HUD 同款材质，跟随明暗模式
     UIBlurEffect *effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterial];
@@ -47,16 +47,17 @@ static inline CGFloat IVHairline(void) {
     [self addSubview:_blur];
 
     // 2) 白色薄雾 + 曲面渐变（挂在 blur.contentView 上，自动被圆角裁掉）
+    // 薄雾要薄：太厚就变成一块实心白条，看不出底下在放视频
     _tint = [[UIView alloc] initWithFrame:CGRectZero];
-    _tint.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.18];
+    _tint.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.10];
     _tint.userInteractionEnabled = NO;
     [_blur.contentView addSubview:_tint];
 
     _sheen = [CAGradientLayer layer];
     _sheen.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:0.34].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.04].CGColor,
-        (id)[UIColor colorWithWhite:0.0 alpha:0.12].CGColor
+        (id)[UIColor colorWithWhite:1.0 alpha:0.38].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.03].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.14].CGColor
     ];
     _sheen.locations = @[@0.0, @0.55, @1.0];
     _sheen.startPoint = CGPointMake(0.5, 0.0);
@@ -67,8 +68,8 @@ static inline CGFloat IVHairline(void) {
     _spec = [CAGradientLayer layer];
     _spec.type = kCAGradientLayerRadial;
     _spec.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:0.30].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.09].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.42].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.12].CGColor,
         (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor
     ];
     _spec.locations = @[@0.0, @0.42, @1.0];
@@ -78,17 +79,19 @@ static inline CGFloat IVHairline(void) {
     _spec.endPoint = CGPointMake(1.0, 1.0);
     [_blur.contentView.layer addSublayer:_spec];
 
-    // 4) 边缘光：左上最亮 → 中间弱 → 右下再亮一次
+    // 4) 边缘光：纵向渐变 —— 上沿白亮、腰身几乎透明、下沿压一道暗边。
+    // 这一段是「玻璃」和「白色贴纸」的分水岭：只描白边在浅色画面上完全看不见。
     _rim = [CAGradientLayer layer];
     _rim.colors = @[
-        (id)[UIColor colorWithWhite:1.0 alpha:0.88].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.16].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.60].CGColor,
-        (id)[UIColor colorWithWhite:1.0 alpha:0.10].CGColor
+        (id)[UIColor colorWithWhite:1.0 alpha:0.92].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.30].CGColor,
+        (id)[UIColor colorWithWhite:1.0 alpha:0.06].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.06].CGColor,
+        (id)[UIColor colorWithWhite:0.0 alpha:0.22].CGColor
     ];
-    _rim.locations = @[@0.0, @0.34, @0.62, @1.0];
-    _rim.startPoint = CGPointMake(0.0, 0.0);
-    _rim.endPoint = CGPointMake(1.0, 1.0);
+    _rim.locations = @[@0.0, @0.16, @0.40, @0.60, @1.0];
+    _rim.startPoint = CGPointMake(0.5, 0.0);
+    _rim.endPoint = CGPointMake(0.5, 1.0);
 
     _rimMask = [CAShapeLayer layer];
     _rimMask.fillColor = [UIColor clearColor].CGColor;
